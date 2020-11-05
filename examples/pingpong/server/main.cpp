@@ -7,7 +7,7 @@ int main() {
     asio::io_context io;
     trellis::server_context<> server (io, 6969);
 
-    server.receive();
+    server.listen();
 
     io.run();
 }
