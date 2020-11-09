@@ -1,26 +1,15 @@
 #pragma once
 
 #include "channel.hpp"
+#include "context_traits.hpp"
 #include "logging.hpp"
 #include "message_header.hpp"
-#include "utility.hpp"
 
 #include <asio.hpp>
 
 #include <type_traits>
 
 namespace trellis {
-
-template <typename Context>
-struct context_traits;
-
-template <template <typename...> typename Context, typename... Channels>
-struct context_traits<Context<Channels...>> {
-    using channel_state_tuple = std::tuple<channel<Channels>...>;
-
-    template <typename Channel>
-    static constexpr auto channel_index = index_of_v<Channel, Channels...>;
-};
 
 template <typename Context>
 class connection : public std::enable_shared_from_this<connection<Context>> {
@@ -95,6 +84,11 @@ public:
     }
 
     void disconnect() {
+        disconnect([]{});
+    }
+
+    template <typename F>
+    void disconnect(const F& func) {
         if (!connected) return;
 
         connected = false;
@@ -103,9 +97,12 @@ public:
         auto type = headers::type::DISCONNECT;
         std::memcpy(buffer->data(), &type, sizeof(type));
 
-        socket->async_send_to(asio::buffer(*buffer, sizeof(type)), client_endpoint, [buffer, ptr = this->shared_from_this()](asio::error_code ec, std::size_t size) {
+        TRELLIS_LOG_DATAGRAM("d/cn", *buffer, sizeof(type));
+
+        socket->async_send_to(asio::buffer(*buffer, sizeof(type)), client_endpoint, [buffer, func, ptr = this->shared_from_this()](asio::error_code ec, std::size_t size) {
             ptr->context->free_pending_buffer(buffer);
             ptr->context->kill(*ptr);
+            func();
         });
     }
 

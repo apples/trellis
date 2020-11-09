@@ -15,13 +15,13 @@ using connection_ptr = std::shared_ptr<connection_type>;
 
 int main() {
     asio::io_context io;
-    auto client_endpoint = asio::ip::udp::endpoint(asio::ip::udp::v4(), 0);
-    auto server_endpoint = asio::ip::udp::endpoint(asio::ip::make_address_v4("127.0.0.1"), 6969);
-    auto client = client_context(io, client_endpoint, server_endpoint);
+    auto client_endpoint = client_context::protocol::endpoint(client_context::protocol::v4(), 0);
+    auto server_endpoint = client_context::protocol::endpoint(asio::ip::make_address_v4("127.0.0.1"), 6969);
+    auto client = client_context(io);
 
     std::cout << "Connecting..." << std::endl;
 
-    client.connect([&](client_context& context, const connection_ptr& conn) {
+    client.connect(client_endpoint, server_endpoint, [&](client_context& context, const connection_ptr& conn) {
         std::cout << "Connection success" << std::endl;
         std::cout << "Sending message_ping..." << std::endl;
 

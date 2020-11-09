@@ -16,7 +16,7 @@ using connection_ptr = std::shared_ptr<connection_type>;
 int main() {
     auto io = asio::io_context();
     
-    auto server = server_context(io, 6969);
+    auto server = server_context(io);
     
     server.on_receive<channel_pingpong>([](server_context& server, const connection_ptr& conn, std::istream& packet) {
         auto message = any_message{};
@@ -47,7 +47,7 @@ int main() {
         }, message);
     });
 
-    server.listen();
+    server.listen({server_context::protocol::v4(), 6969});
 
     io.run();
 }
