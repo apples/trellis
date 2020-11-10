@@ -46,3 +46,16 @@ target_link_libraries(pingpong_server trellis)
 target_include_directories(pingpong_server PRIVATE
     "${CEREAL_DIR}/include")
 target_compile_definitions(pingpong_server PRIVATE TRELLIS_ENABLE_LOGGING)
+
+# proxy example
+
+add_executable(proxy_example
+    examples/proxy/main.cpp
+    examples/proxy/channels.hpp
+    examples/proxy/message.hpp
+    examples/proxy/overload.hpp)
+set_property(TARGET proxy_example PROPERTY CXX_STANDARD 17)
+target_link_libraries(proxy_example trellis)
+target_include_directories(proxy_example PRIVATE
+    "${CEREAL_DIR}/include")
+target_compile_definitions(proxy_example PRIVATE TRELLIS_ENABLE_LOGGING)

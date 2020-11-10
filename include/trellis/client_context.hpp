@@ -23,6 +23,7 @@ public:
     friend base_type;
     friend connection_type;
 
+    using typename base_type::connection_ptr;
     using typename base_type::protocol;
 
     using connect_function = std::function<void(client_context&, const std::shared_ptr<connection_type>&)>;
@@ -40,6 +41,10 @@ public:
         this->open(client_endpoint);
         conn = std::make_shared<connection_type>(*this, this->get_socket(), server_endpoint);
         conn->send_connect();
+    }
+
+    auto get_endpoint() const -> typename protocol::endpoint {
+        return this->get_socket().local_endpoint();
     }
 
     void disconnect_all() {

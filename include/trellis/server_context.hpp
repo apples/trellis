@@ -24,6 +24,7 @@ public:
     friend base_type;
     friend connection_type;
 
+    using typename base_type::connection_ptr;
     using typename base_type::protocol;
 
     using connection_map = std::map<typename protocol::endpoint, std::shared_ptr<connection_type>>;
@@ -34,6 +35,10 @@ public:
 
     void listen(const typename protocol::endpoint& endpoint) {
         this->open(endpoint);
+    }
+
+    auto get_endpoint() const -> typename protocol::endpoint {
+        return this->get_socket().local_endpoint();
     }
 
     void disconnect_all() {

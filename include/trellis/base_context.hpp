@@ -23,9 +23,10 @@ public:
     using derived_type = C;
     using traits = context_traits<derived_type>;
     using connection_type = connection<derived_type>;
+    using connection_ptr = std::shared_ptr<connection_type>;
     using protocol = asio::ip::udp;
     using buffer_iterator = datagram_buffer_cache::buffer_iterator;
-    using receive_function = std::function<void(derived_type&, const std::shared_ptr<connection_type>&, std::istream&)>;
+    using receive_function = std::function<void(derived_type&, const connection_ptr&, std::istream&)>;
 
     base_context(asio::io_context& io) :
         socket(io),
@@ -44,9 +45,11 @@ public:
     }
 
     void stop() {
-        running = false;
-        auto derived = static_cast<derived_type*>(this);
-        derived->disconnect_all();
+        if (running) {
+            running = false;
+            auto derived = static_cast<derived_type*>(this);
+            derived->disconnect_all();
+        }
     }
 
     template <typename Channel>
@@ -56,6 +59,10 @@ public:
 
 protected:
     auto get_socket() -> protocol::socket& {
+        return socket;
+    }
+
+    auto get_socket() const -> const protocol::socket& {
         return socket;
     }
 
@@ -80,7 +87,7 @@ protected:
 
         if (!func) {
             std::cerr << "Warning: No receive handler for channel_id " << channel_id << std::endl;
-            func = [](derived_type&, const std::shared_ptr<connection_type>&, std::istream&) {};
+            func = [](derived_type&, const connection_ptr&, std::istream&) {};
         }
 
         return func;
@@ -96,7 +103,7 @@ private:
                 if (running) {
                     receive();
                 }
-            } else if (ec.value() != asio::error::operation_aborted) {
+            } else if (ec && ec.value() != asio::error::operation_aborted) {
                 std::cerr << "[trellis] ERROR " << ec.category().name() << ": " << ec.message() << std::endl;
                 stop();
             }
