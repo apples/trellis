@@ -28,13 +28,26 @@ public:
     using buffer_iterator = datagram_buffer_cache::buffer_iterator;
     using receive_function = std::function<void(derived_type&, const connection_ptr&, std::istream&)>;
 
+    friend connection_type;
+
     base_context(asio::io_context& io) :
+        io(&io),
         socket(io),
         cache(),
+        rng(std::random_device{}()),
         receive_funcs(),
         sender_endpoint(),
         buffer(),
+        context_id(std::uniform_int_distribution<std::uint16_t>{}(rng)),
         running(false) {}
+
+    auto get_io() -> asio::io_context& {
+        return *io;
+    }
+
+    auto get_context_id() const -> std::uint16_t {
+        return context_id;
+    }
 
     auto make_pending_buffer() -> buffer_iterator {
         return cache.make_pending_buffer();
@@ -55,6 +68,10 @@ public:
     template <typename Channel>
     void on_receive(receive_function func) {
         receive_funcs[traits::template channel_index<Channel>] = std::move(func);
+    }
+
+    auto get_rng() -> std::mt19937& {
+        return rng;
     }
 
 protected:
@@ -96,27 +113,33 @@ protected:
 private:
     void receive() {
         socket.async_receive_from(asio::buffer(buffer), sender_endpoint, [this](asio::error_code ec, std::size_t size) {
-            if (!ec && running) {
-                TRELLIS_LOG_DATAGRAM("recv", buffer, size);
-                auto derived = static_cast<derived_type*>(this);
-                derived->receive(buffer, sender_endpoint, size);
+            if (!ec) {
                 if (running) {
-                    receive();
+                    TRELLIS_LOG_DATAGRAM("recv", buffer, size);
+                    auto derived = static_cast<derived_type*>(this);
+                    derived->receive(buffer, sender_endpoint, size);
+                    if (running) {
+                        receive();
+                    }
                 }
-            } else if (ec && ec.value() != asio::error::operation_aborted) {
+            } else if (ec.value() != asio::error::operation_aborted) {
                 std::cerr << "[trellis] ERROR " << ec.category().name() << ": " << ec.message() << std::endl;
                 stop();
             }
         });
     }
 
+    asio::io_context* io;
     protocol::socket socket;
     datagram_buffer_cache cache;
+    std::mt19937 rng;
 
     std::array<receive_function, traits::channel_count> receive_funcs;
 
     protocol::endpoint sender_endpoint;
     datagram_buffer buffer;
+
+    std::uint16_t context_id;
 
     bool running;
 };

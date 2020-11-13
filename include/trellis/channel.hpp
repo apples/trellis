@@ -86,19 +86,17 @@ private:
 template <typename Channel>
 struct channel;
 
-template <typename T>
-class channel<channel_def<T, false, false>> {
+template <typename Tag>
+class channel<channel_def<Tag, false, false>> {
 public:
-    template <typename C>
-    friend class connection;
-
-    channel() : sequence_id(0), assemblers() {}
+    channel() :
+        sequence_id(0x9384), // TODO: randomize
+        assemblers() {}
 
     auto next_sequence_id() -> std::uint16_t {
         return sequence_id++;
     }
 
-private:
     template <typename F>
     void receive(const headers::data& header, const datagram_buffer& datagram, size_t count, const F& on_receive_func) {
         assert(count <= config::datagram_size);
@@ -142,6 +140,7 @@ private:
         }
     }
 
+private:
     std::uint16_t sequence_id;
     std::array<fragment_assembler, config::assembler_slots> assemblers;
 };

@@ -33,7 +33,16 @@ public:
     }
 
     void free_pending_buffer(buffer_iterator iter) {
+        // If the list is empty, we can't possibly free anything.
         assert(next_buffer != pending_buffers.begin());
+
+        // The iterator must be valid, otherwise this is probably a double-free.
+        assert([&]{
+            for (auto i = pending_buffers.begin(); i != next_buffer; ++i) {
+                if (i == iter) return true;
+            }
+            return false;
+        }());
 
         --next_buffer;
         if (iter != next_buffer) {

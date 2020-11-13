@@ -61,7 +61,11 @@ int main() {
     proxy.listen({asio::ip::make_address_v4("127.0.0.1"), 0}, server.get_endpoint());
     std::cout << "proxy_endpoint: " << proxy.get_endpoint() << std::endl;
 
-    client.connect({asio::ip::udp::v4(), 0}, proxy.get_endpoint(), [&](client_context& context, const client_context::connection_ptr& conn) {
+    proxy.set_client_drop_rate(0.5);
+    proxy.set_server_drop_rate(0.5);
+
+    client.connect({asio::ip::udp::v4(), 0}, proxy.get_endpoint());
+    client.on_connect([&](client_context& context, const client_context::connection_ptr& conn) {
         std::cout << "Connection success" << std::endl;
         std::cout << "Sending message_numbers..." << std::endl;
 

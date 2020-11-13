@@ -21,7 +21,8 @@ int main() {
 
     std::cout << "Connecting..." << std::endl;
 
-    client.connect(client_endpoint, server_endpoint, [&](client_context& context, const connection_ptr& conn) {
+    client.connect(client_endpoint, server_endpoint);
+    client.on_connect([&](client_context& context, const connection_ptr& conn) {
         std::cout << "Connection success" << std::endl;
         std::cout << "Sending message_ping..." << std::endl;
 

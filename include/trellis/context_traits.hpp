@@ -1,6 +1,6 @@
 #pragma once
 
-#include "channel.hpp"
+#include <asio.hpp>
 
 #include <tuple>
 #include <type_traits>
@@ -21,7 +21,8 @@ struct context_traits;
 
 template <template <typename...> typename Context, typename... Channels>
 struct context_traits<Context<Channels...>> {
-    using channel_state_tuple = std::tuple<channel<Channels>...>;
+    using context_type = Context<Channels...>;
+    using protocol = asio::ip::udp;
 
     template <typename Channel>
     static constexpr auto channel_index = index_of_v<Channel, Channels...>;

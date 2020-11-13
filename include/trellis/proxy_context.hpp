@@ -11,6 +11,7 @@
 #include <iostream>
 #include <memory>
 #include <map>
+#include <random>
 
 namespace trellis {
 
@@ -24,7 +25,10 @@ public:
         sender_endpoint(),
         proxy_buffer(),
         connections(),
-        running(false) {}
+        running(false),
+        rng(std::random_device{}()),
+        client_drop_rate(0),
+        server_drop_rate(0) {}
 
     void listen(const protocol::endpoint& proxy_endpoint, const protocol::endpoint& remote_endpoint) {
         proxy_socket.open(proxy_endpoint.protocol());
@@ -49,6 +53,14 @@ public:
         proxy_socket.close();
     }
 
+    void set_client_drop_rate(double chance) {
+        client_drop_rate = chance;
+    }
+
+    void set_server_drop_rate(double chance) {
+        server_drop_rate = chance;
+    }
+
 private:
     struct proxy_connection {
         protocol::endpoint client_endpoint;
@@ -57,6 +69,7 @@ private:
         datagram_buffer buffer;
     };
 
+    // Client => Server
     void receive() {
         proxy_socket.async_receive_from(asio::buffer(proxy_buffer), sender_endpoint, [this](asio::error_code ec, std::size_t size) {
             if (ec.value() == asio::error::operation_aborted || !running) {
@@ -99,20 +112,27 @@ private:
             assert(iter != connections.end());
             assert(iter->second.client_endpoint == sender_endpoint);
 
-            std::cout << "[trellis] PROXY client " << iter->second.client_endpoint << " == " << iter->second.socket.local_endpoint() << " => server " << remote_endpoint << std::endl;
+            auto drop_roll = std::uniform_real_distribution<>{0.0, 1.0}(rng);
 
-            iter->second.socket.async_send_to(asio::buffer(proxy_buffer, size), remote_endpoint, [this, sz = size](asio::error_code ec, std::size_t size) {
-                if (ec && ec.value() != asio::error::operation_aborted) {
-                    std::cerr << "[trellis] PROXY ERROR while sending packet to " << remote_endpoint << ": " << ec.category().name() << ": " << ec.message() << std::endl;
-                } else if (!ec) {
-                    assert(size == sz);
-                }
-            });
+            if (drop_roll < client_drop_rate) {
+                std::cout << "[trellis] PROXY dropped" << std::endl;
+            } else {
+                std::cout << "[trellis] PROXY client " << iter->second.client_endpoint << " == " << iter->second.socket.local_endpoint() << " => server " << remote_endpoint << std::endl;
+
+                iter->second.socket.async_send_to(asio::buffer(proxy_buffer, size), remote_endpoint, [this, sz = size](asio::error_code ec, std::size_t size) {
+                    if (ec && ec.value() != asio::error::operation_aborted) {
+                        std::cerr << "[trellis] PROXY ERROR while sending packet to " << remote_endpoint << ": " << ec.category().name() << ": " << ec.message() << std::endl;
+                    } else if (!ec) {
+                        assert(size == sz);
+                    }
+                });
+            }
 
             receive();
         });
     }
 
+    // Server => Client
     void receive(proxy_connection& conn) {
         conn.socket.async_receive_from(asio::buffer(conn.buffer), conn.sender_endpoint, [this, &conn](asio::error_code ec, std::size_t size) {
             if (ec.value() == asio::error::operation_aborted || !running) {
@@ -127,15 +147,21 @@ private:
 
             assert(conn.sender_endpoint == remote_endpoint);
 
-            std::cout << "[trellis] PROXY server " << remote_endpoint << " == " << proxy_socket.local_endpoint() << " => client " << conn.client_endpoint << std::endl;
+            auto drop_roll = std::uniform_real_distribution<>{0.0, 1.0}(rng);
 
-            proxy_socket.async_send_to(asio::buffer(conn.buffer, size), conn.client_endpoint, [this, &conn, sz = size](asio::error_code ec, std::size_t size) {
-                if (ec && ec.value() != asio::error::operation_aborted) {
-                    std::cerr << "[trellis] PROXY ERROR while sending packet to " << conn.client_endpoint << ": " << ec.category().name() << ": " << ec.message() << std::endl;
-                } else if (!ec) {
-                    assert(size == sz);
-                }
-            });
+            if (drop_roll < server_drop_rate) {
+                std::cout << "[trellis] PROXY dropped" << std::endl;
+            } else {
+                std::cout << "[trellis] PROXY server " << remote_endpoint << " == " << proxy_socket.local_endpoint() << " => client " << conn.client_endpoint << std::endl;
+
+                proxy_socket.async_send_to(asio::buffer(conn.buffer, size), conn.client_endpoint, [this, &conn, sz = size](asio::error_code ec, std::size_t size) {
+                    if (ec && ec.value() != asio::error::operation_aborted) {
+                        std::cerr << "[trellis] PROXY ERROR while sending packet to " << conn.client_endpoint << ": " << ec.category().name() << ": " << ec.message() << std::endl;
+                    } else if (!ec) {
+                        assert(size == sz);
+                    }
+                });
+            }
 
             receive(conn);
         });
@@ -148,6 +174,9 @@ private:
     datagram_buffer proxy_buffer;
     std::map<protocol::endpoint, proxy_connection> connections;
     bool running;
+    std::mt19937 rng;
+    double client_drop_rate;
+    double server_drop_rate;
 };
 
 } // namespace trellis
