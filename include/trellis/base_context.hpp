@@ -25,7 +25,6 @@ public:
     using connection_type = connection<derived_type>;
     using connection_ptr = std::shared_ptr<connection_type>;
     using protocol = asio::ip::udp;
-    using buffer_iterator = datagram_buffer_cache::buffer_iterator;
     using receive_function = std::function<void(derived_type&, const connection_ptr&, std::istream&)>;
 
     friend connection_type;
@@ -49,12 +48,8 @@ public:
         return context_id;
     }
 
-    auto make_pending_buffer() -> buffer_iterator {
+    auto make_pending_buffer() -> shared_datagram_buffer {
         return cache.make_pending_buffer();
-    }
-
-    void free_pending_buffer(buffer_iterator iter) {
-        cache.free_pending_buffer(iter);
     }
 
     void stop() {
@@ -112,10 +107,10 @@ protected:
 
 private:
     void receive() {
-        socket.async_receive_from(asio::buffer(buffer), sender_endpoint, [this](asio::error_code ec, std::size_t size) {
+        socket.async_receive_from(asio::buffer(buffer.data), sender_endpoint, [this](asio::error_code ec, std::size_t size) {
             if (!ec) {
                 if (running) {
-                    TRELLIS_LOG_DATAGRAM("recv", buffer, size);
+                    TRELLIS_LOG_DATAGRAM("recv", buffer.data, size);
                     auto derived = static_cast<derived_type*>(this);
                     derived->receive(buffer, sender_endpoint, size);
                     if (running) {

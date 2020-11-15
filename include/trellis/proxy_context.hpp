@@ -71,7 +71,7 @@ private:
 
     // Client => Server
     void receive() {
-        proxy_socket.async_receive_from(asio::buffer(proxy_buffer), sender_endpoint, [this](asio::error_code ec, std::size_t size) {
+        proxy_socket.async_receive_from(asio::buffer(proxy_buffer.data), sender_endpoint, [this](asio::error_code ec, std::size_t size) {
             if (ec.value() == asio::error::operation_aborted || !running) {
                 std::cerr << "[trellis] PROXY shutting down" << std::endl;
                 return;
@@ -81,7 +81,7 @@ private:
                 return;
             }
 
-            TRELLIS_LOG_DATAGRAM("prox", proxy_buffer, size);
+            TRELLIS_LOG_DATAGRAM("prox", proxy_buffer.data, size);
 
             auto iter = connections.find(sender_endpoint);
 
@@ -119,7 +119,11 @@ private:
             } else {
                 std::cout << "[trellis] PROXY client " << iter->second.client_endpoint << " == " << iter->second.socket.local_endpoint() << " => server " << remote_endpoint << std::endl;
 
-                iter->second.socket.async_send_to(asio::buffer(proxy_buffer, size), remote_endpoint, [this, sz = size](asio::error_code ec, std::size_t size) {
+                auto buffer = cache.make_pending_buffer();
+
+                std::memcpy(buffer.data(), proxy_buffer.data.data(), size);
+
+                iter->second.socket.async_send_to(buffer.buffer(size), remote_endpoint, [this, buffer, sz = size](asio::error_code ec, std::size_t size) {
                     if (ec && ec.value() != asio::error::operation_aborted) {
                         std::cerr << "[trellis] PROXY ERROR while sending packet to " << remote_endpoint << ": " << ec.category().name() << ": " << ec.message() << std::endl;
                     } else if (!ec) {
@@ -134,7 +138,7 @@ private:
 
     // Server => Client
     void receive(proxy_connection& conn) {
-        conn.socket.async_receive_from(asio::buffer(conn.buffer), conn.sender_endpoint, [this, &conn](asio::error_code ec, std::size_t size) {
+        conn.socket.async_receive_from(asio::buffer(conn.buffer.data), conn.sender_endpoint, [this, &conn](asio::error_code ec, std::size_t size) {
             if (ec.value() == asio::error::operation_aborted || !running) {
                 return;
             } else if (ec) {
@@ -143,7 +147,7 @@ private:
                 return;
             }
 
-            TRELLIS_LOG_DATAGRAM("prox", conn.buffer, size);
+            TRELLIS_LOG_DATAGRAM("prox", conn.buffer.data, size);
 
             assert(conn.sender_endpoint == remote_endpoint);
 
@@ -154,7 +158,11 @@ private:
             } else {
                 std::cout << "[trellis] PROXY server " << remote_endpoint << " == " << proxy_socket.local_endpoint() << " => client " << conn.client_endpoint << std::endl;
 
-                proxy_socket.async_send_to(asio::buffer(conn.buffer, size), conn.client_endpoint, [this, &conn, sz = size](asio::error_code ec, std::size_t size) {
+                auto buffer = cache.make_pending_buffer();
+
+                std::memcpy(buffer.data(), conn.buffer.data.data(), size);
+
+                proxy_socket.async_send_to(buffer.buffer(size), conn.client_endpoint, [this, &conn, buffer, sz = size](asio::error_code ec, std::size_t size) {
                     if (ec && ec.value() != asio::error::operation_aborted) {
                         std::cerr << "[trellis] PROXY ERROR while sending packet to " << conn.client_endpoint << ": " << ec.category().name() << ": " << ec.message() << std::endl;
                     } else if (!ec) {
@@ -172,6 +180,7 @@ private:
     protocol::endpoint remote_endpoint;
     protocol::endpoint sender_endpoint;
     datagram_buffer proxy_buffer;
+    datagram_buffer_cache cache;
     std::map<protocol::endpoint, proxy_connection> connections;
     bool running;
     std::mt19937 rng;

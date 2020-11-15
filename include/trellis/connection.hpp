@@ -36,7 +36,6 @@ public:
     using protocol_type = typename context_type::protocol;
     using endpoint_type = typename protocol_type::endpoint;
     using channel_state_tuple = typename context_type::channel_state_tuple;
-    using buffer_iterator = typename context_type::buffer_iterator;
 
     using std::enable_shared_from_this<connection>::shared_from_this;
 
@@ -85,13 +84,13 @@ public:
             header.fragment_count = num_fragments;
             header.fragment_id = iter - b;
 
-            std::memcpy(buffer->data(), &type, sizeof(type));
-            std::memcpy(buffer->data() + sizeof(type), &header, sizeof(headers::data));
+            std::memcpy(buffer.data(), &type, sizeof(type));
+            std::memcpy(buffer.data() + sizeof(type), &header, sizeof(headers::data));
 
             if (iter == e - 1) {
-                send_raw_nofree(buffer, last_payload_size + headers::data_offset);
+                send_raw(buffer, last_payload_size + headers::data_offset);
             } else {
-                send_raw_nofree(buffer, config::datagram_size);
+                send_raw(buffer, config::datagram_size);
             }
         }
     }
@@ -113,13 +112,12 @@ public:
 
         auto buffer = context->make_pending_buffer();
         auto type = headers::type::DISCONNECT;
-        std::memcpy(buffer->data(), &type, sizeof(type));
+        std::memcpy(buffer.data(), &type, sizeof(type));
 
-        TRELLIS_LOG_DATAGRAM("d/cn", *buffer, sizeof(type));
+        TRELLIS_LOG_DATAGRAM("d/cn", buffer, sizeof(type));
 
-        context->get_socket().async_send_to(asio::buffer(*buffer, sizeof(type)), client_endpoint, [buffer, func, ptr = this->shared_from_this()](asio::error_code ec, std::size_t size) {
+        context->get_socket().async_send_to(buffer.buffer(sizeof(type)), client_endpoint, [buffer, func, ptr = this->shared_from_this()](asio::error_code ec, std::size_t size) {
             TRELLIS_LOG_ACTION("conn", ptr->connection_id, "Sent DISCONNECT successfully, killing connection.");
-            ptr->context->free_pending_buffer(buffer);
             ptr->context->kill(*ptr);
             func();
         });
@@ -128,7 +126,7 @@ public:
 private:
     struct handshake_state {
         asio::steady_timer timer;
-        buffer_iterator buffer;
+        shared_datagram_buffer buffer;
     };
 
     /**
@@ -146,10 +144,10 @@ private:
             auto buffer = context->make_pending_buffer();
             auto type = headers::type::CONNECT;
 
-            std::memcpy(buffer->data(), &type, sizeof(type));
+            std::memcpy(buffer.data(), &type, sizeof(type));
 
             TRELLIS_LOG_ACTION("conn", connection_id, "Sending CONNECT.");
-            send_raw_nofree(buffer, sizeof(type));
+            send_raw(buffer, sizeof(type));
 
             handshake = handshake_state{
                 asio::steady_timer(context->get_io()),
@@ -175,7 +173,7 @@ private:
             assert(state == connection_state::CONNECTING);
 
             TRELLIS_LOG_ACTION("conn", connection_id, "Resending CONNECT due to timeout.");
-            send_raw_nofree(handshake->buffer, sizeof(headers::type));
+            send_raw(handshake->buffer, sizeof(headers::type));
 
             send_connect();
         });
@@ -214,8 +212,8 @@ private:
 
         constexpr auto size = sizeof(type) + sizeof(header);
 
-        std::memcpy(buffer->data(), &type, sizeof(type));
-        std::memcpy(buffer->data() + sizeof(type), &header, sizeof(header));
+        std::memcpy(buffer.data(), &type, sizeof(type));
+        std::memcpy(buffer.data() + sizeof(type), &header, sizeof(header));
 
         send_raw(buffer, size);
     }
@@ -238,11 +236,11 @@ private:
             auto header = headers::connect_ok{connection_id};
             constexpr auto size = sizeof(type) + sizeof(header);
 
-            std::memcpy(buffer->data(), &type, sizeof(type));
-            std::memcpy(buffer->data() + sizeof(type), &header, sizeof(header));
+            std::memcpy(buffer.data(), &type, sizeof(type));
+            std::memcpy(buffer.data() + sizeof(type), &header, sizeof(header));
 
             TRELLIS_LOG_ACTION("conn", connection_id, "Sending CONNECT_OK.");
-            send_raw_nofree(buffer, size);
+            send_raw(buffer, size);
 
             handshake = handshake_state{
                 asio::steady_timer(context->get_io()),
@@ -276,7 +274,7 @@ private:
 
             TRELLIS_LOG_ACTION("conn", connection_id, "Resending CONNECT_OK due to timeout.");
 
-            send_raw_nofree(handshake->buffer, size);
+            send_raw(handshake->buffer, size);
 
             send_connect_ok();
         });
@@ -307,9 +305,6 @@ private:
         // Can't cancel something that doesn't exist.
         assert(handshake);
 
-        handshake->timer.cancel();
-        context->free_pending_buffer(handshake->buffer);
-
         handshake = std::nullopt;
     }
 
@@ -328,28 +323,12 @@ private:
     }
 
     /** Sends a DATA datagram and frees the buffer when done. */
-    void send_raw(buffer_iterator data, std::size_t count) {
+    void send_raw(const shared_datagram_buffer& data, std::size_t count) {
         if (state == connection_state::DISCONNECTED) return;
 
-        TRELLIS_LOG_DATAGRAM("send", *data, count);
+        TRELLIS_LOG_DATAGRAM("send", data, count);
 
-        context->get_socket().async_send_to(asio::buffer(*data, count), client_endpoint, [data, ptr = shared_from_this()](asio::error_code ec, std::size_t size) {
-            ptr->context->free_pending_buffer(data);
-
-            if (ec) {
-                std::cerr << "Error: " << ec.category().name() << ": " << ec.message() << std::endl;
-                ptr->disconnect();
-            }
-        });
-    }
-
-    /** Sends a DATA datagram but does not free the buffer. */
-    void send_raw_nofree(buffer_iterator data, std::size_t count) {
-        if (state == connection_state::DISCONNECTED) return;
-
-        TRELLIS_LOG_DATAGRAM("send", *data, count);
-
-        context->get_socket().async_send_to(asio::buffer(*data, count), client_endpoint, [ptr = shared_from_this()](asio::error_code ec, std::size_t size) {
+        context->get_socket().async_send_to(data.buffer(count), client_endpoint, [data, ptr = shared_from_this()](asio::error_code ec, std::size_t size) {
             if (ec) {
                 std::cerr << "Error: " << ec.category().name() << ": " << ec.message() << std::endl;
                 ptr->disconnect();

@@ -80,7 +80,7 @@ private:
 
         auto type = headers::type{};
 
-        std::memcpy(&type, buffer.data(), sizeof(headers::type));
+        std::memcpy(&type, buffer.data.data(), sizeof(headers::type));
 
         switch (type) {
             case headers::type::CONNECT: {
@@ -91,7 +91,7 @@ private:
             }
             case headers::type::CONNECT_OK: {
                 auto header = headers::connect_ok{};
-                std::memcpy(&header, buffer.data() + sizeof(type), sizeof(headers::connect_ok));
+                std::memcpy(&header, buffer.data.data() + sizeof(type), sizeof(headers::connect_ok));
 
                 TRELLIS_LOG_ACTION("client", get_context_id(), "CONNECT_OK (scid:", header.connection_id, ") from server ", sender_endpoint, ".");
 
@@ -126,7 +126,7 @@ private:
                 }
 
                 auto header = headers::data{};
-                std::memcpy(&header, buffer.data() + sizeof(headers::type), sizeof(headers::data));
+                std::memcpy(&header, buffer.data.data() + sizeof(headers::type), sizeof(headers::data));
 
                 if (header.channel_id >= sizeof...(Channels)) {
                     TRELLIS_LOG_ACTION("client", get_context_id(), "DATA received with invalid channel_id. Disconnecting.");

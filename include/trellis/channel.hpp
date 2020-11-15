@@ -104,9 +104,9 @@ public:
 
         if (header.fragment_count == 1) {
             assert(header.fragment_id == 0);
-            auto b = datagram.data() + headers::data_offset;
-            auto e = datagram.data() + count;
-            assert(e <= datagram.data() + datagram.size());
+            auto b = datagram.data.data() + headers::data_offset;
+            auto e = datagram.data.data() + count;
+            assert(count <= config::datagram_size);
             auto istream = ibytestream(b, e);
             on_receive_func(istream);
         } else {
@@ -127,9 +127,9 @@ public:
             }
 
             if (current_sid == header.sequence_id) {
-                auto b = datagram.data() + headers::data_offset;
-                auto e = datagram.data() + count;
-                assert(e <= datagram.data() + datagram.size());
+                auto b = datagram.data.data() + headers::data_offset;
+                auto e = datagram.data.data() + count;
+                assert(count <= config::datagram_size);
                 assembler.receive(header, b, e);
 
                 if (assembler.is_complete()) {

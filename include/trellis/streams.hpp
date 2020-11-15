@@ -42,7 +42,7 @@ public:
     using std::streambuf::pos_type;
     using std::streambuf::off_type;
 
-    using fragment_array = std::array<datagram_buffer_cache::buffer_iterator, config::max_fragments>;
+    using fragment_array = std::array<shared_datagram_buffer, config::max_fragments>;
     using fragment_iterator = fragment_array::iterator;
 
     static constexpr std::size_t payload_size = config::datagram_size - headers::data_offset;
@@ -53,12 +53,6 @@ public:
         fragments_back(fragments.begin()),
         current_fragment(fragments.begin()),
         max_pos(0) {}
-
-    ~packetbuf() {
-        for (auto i = fragments.begin(); i < fragments_back; ++i) {
-            conn->get_context().free_pending_buffer(*i);
-        }
-    }
 
     virtual int_type overflow(int_type ch) {
         if (!traits_type::eq_int_type(ch, traits_type::eof())) {
@@ -74,8 +68,8 @@ public:
             }
 
             auto& fragment = *current_fragment;
-            auto b = fragment->data() + headers::data_offset;
-            auto e = fragment->data() + fragment->size();
+            auto b = fragment.data() + headers::data_offset;
+            auto e = fragment.data() + fragment.size();
 
             *b = ch;
 
@@ -92,7 +86,7 @@ public:
         switch (dir) {
             case std::ios_base::cur: {
                 auto cur_pos = pptr() - pbase() + payload_size * (current_fragment - fragments.begin());
-                
+
                 if (off == 0) {
                     return cur_pos;
                 }
@@ -147,14 +141,14 @@ public:
 
         for (; fragments_back <= current_fragment; ++fragments_back) {
             *fragments_back = conn->get_context().make_pending_buffer();
-            (*fragments_back)->fill('\0');
+            fragments_back->clear();
         }
 
         assert(current_fragment < fragments_back);
 
         auto& fragment = *current_fragment;
-        auto b = fragment->data() + headers::data_offset;
-        auto e = fragment->data() + fragment->size();
+        auto b = fragment.data() + headers::data_offset;
+        auto e = fragment.data() + fragment.size();
 
         setp(b, e);
         pbump(new_offset);

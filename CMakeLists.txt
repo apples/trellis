@@ -59,3 +59,8 @@ target_link_libraries(proxy_example trellis)
 target_include_directories(proxy_example PRIVATE
     "${CEREAL_DIR}/include")
 target_compile_definitions(proxy_example PRIVATE TRELLIS_ENABLE_LOGGING)
+target_compile_options(proxy_example PRIVATE -Wall -Wextra)
+
+#
+
+

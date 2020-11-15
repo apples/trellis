@@ -70,7 +70,7 @@ private:
     void receive(const datagram_buffer& buffer, const typename protocol::endpoint& sender_endpoint, std::size_t size) {
         auto type = headers::type{};
 
-        std::memcpy(&type, buffer.data(), sizeof(headers::type));
+        std::memcpy(&type, buffer.data.data(), sizeof(headers::type));
 
         auto iter = active_connections.find(sender_endpoint);
 
@@ -143,7 +143,7 @@ private:
 
                     if (conn->get_state() == connection_state::PENDING || conn->get_state() == connection_state::ESTABLISHED) {
                         auto header = headers::data{};
-                        std::memcpy(&header, buffer.data() + sizeof(headers::type), sizeof(headers::data));
+                        std::memcpy(&header, buffer.data.data() + sizeof(headers::type), sizeof(headers::data));
                         assert(header.channel_id < sizeof...(Channels));
 
                         auto& receive_func = this->get_receive_func(header.channel_id);
