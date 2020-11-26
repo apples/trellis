@@ -4,6 +4,7 @@
 #include "overload.hpp"
 
 #include <cereal/archives/binary.hpp>
+#include <cereal/types/string.hpp>
 #include <trellis/trellis.hpp>
 #include <trellis/proxy_context.hpp>
 
@@ -12,6 +13,19 @@
 using client_context = apply_channels<trellis::client_context>;
 using server_context = apply_channels<trellis::server_context>;
 using proxy_context = trellis::proxy_context;
+
+inline const char* important_message =
+    "In 1982, Taeko Okajima is 27 years old, unmarried, has lived her whole life in Tokyo and now works at a company there. "
+    "She decides to take another trip to visit the family of the elder brother of her brother-in-law in the rural countryside to help with the safflower harvest and get away from city life. "
+    "While traveling at night on a sleeper train to Yamagata, she begins to recall memories of herself as a schoolgirl in 1966, and her intense desire to go on holiday like her classmates, all of whom have family outside of the big city. "
+    "At the arrival train station, she is surprised to find out that her brother in law's second cousin Toshio, whom she barely knows, is the one who came to pick her up. "
+    "During her stay in Yamagata, she finds herself increasingly nostalgic and wistful for her childhood self, while simultaneously wrestling with adult issues of career and love. "
+    "The trip dredges up forgotten memories (not all of them good ones) — the first stirrings of childish romance, puberty and growing up, the frustrations of math and boys. "
+    "In lyrical switches between the present and the past, Taeko wonders if she has been true to the dreams of her childhood self. "
+    "In doing so, she begins to realize that Toshio has helped her along the way. "
+    "Finally, Taeko faces her own true self, how she views the world and the people around her. "
+    "Taeko chooses to stay in the countryside instead of returning to Tokyo. "
+    "It is implied that she and Toshio begin a relationship.";
 
 int main() {
     asio::io_context io;
@@ -74,7 +88,7 @@ int main() {
 
             {
                 auto archive = cereal::BinaryOutputArchive(ostream);
-                auto msg = message_numbers{n};
+                auto msg = message_numbers{n, important_message};
                 archive(msg);
             }
 
@@ -92,7 +106,7 @@ int main() {
             archive(message);
         }
 
-        std::cout << "Client received message " << message.number << std::endl;
+        std::cout << "Client received message " << message.number << ", important message " << (message.padding == important_message ? "survived." : "was lost.") << std::endl;
 
         responses[message.number] = true;
     });

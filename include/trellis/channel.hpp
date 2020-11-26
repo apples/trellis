@@ -3,6 +3,7 @@
 #include "config.hpp"
 #include "datagram.hpp"
 #include "message_header.hpp"
+#include "logging.hpp"
 #include "streams.hpp"
 
 #include <bitset>
@@ -51,7 +52,7 @@ public:
         assert(b);
         assert(e);
         assert(b < e);
-        assert(b - e <= fragment_size);
+        assert(std::size_t(e - b) <= fragment_size);
         assert(buffer);
         assert(header.fragment_count == buffer_fragments);
         assert(header.fragment_id < buffer_fragments);
@@ -103,6 +104,8 @@ public:
         assert(count >= headers::data_offset);
 
         if (header.fragment_count == 1) {
+            TRELLIS_LOG_ACTION("channel", +header.channel_id, "Processing message ", header.sequence_id, " as non-fragmented.");
+
             assert(header.fragment_id == 0);
             auto b = datagram.data.data() + headers::data_offset;
             auto e = datagram.data.data() + count;
@@ -110,29 +113,39 @@ public:
             auto istream = ibytestream(b, e);
             on_receive_func(istream);
         } else {
+            TRELLIS_LOG_ACTION("channel", +header.channel_id, "Processing message ", header.sequence_id, " as fragment piece ", +header.fragment_id, " / ", +header.fragment_count, ".");
+
             assert(header.fragment_id < header.fragment_count);
             auto slot = header.sequence_id % config::assembler_slots;
             auto& assembler = assemblers[slot];
-            auto current_sid = assembler.get_sequence_id();
 
             using limits = std::numeric_limits<decltype(headers::data::sequence_id)>;
             auto max_gap = limits::max() / 2 - limits::min() / 2;
 
-            auto is_stale = current_sid == -1 ||
-                            current_sid < header.sequence_id && header.sequence_id - current_sid <= max_gap ||
-                            current_sid > header.sequence_id && current_sid - header.sequence_id > max_gap;
+            auto is_stale = [&]() -> bool {
+                auto current_sid = assembler.get_sequence_id();
+                return current_sid == -1 ||
+                    (current_sid < header.sequence_id && header.sequence_id - current_sid <= max_gap) ||
+                    (current_sid > header.sequence_id && current_sid - header.sequence_id > max_gap);
+            }();
 
             if (is_stale) {
+                TRELLIS_LOG_ACTION("channel", +header.channel_id, "Resetting assembler in slot ", slot, ".");
+
                 assembler.reset(header.sequence_id, header.fragment_count);
             }
 
-            if (current_sid == header.sequence_id) {
+            if (assembler.get_sequence_id() == header.sequence_id) {
+                TRELLIS_LOG_ACTION("channel", +header.channel_id, "Handing packet to assembler in slot ", slot, ".");
+
                 auto b = datagram.data.data() + headers::data_offset;
                 auto e = datagram.data.data() + count;
                 assert(count <= config::datagram_size);
                 assembler.receive(header, b, e);
 
                 if (assembler.is_complete()) {
+                    TRELLIS_LOG_ACTION("channel", +header.channel_id, "Message reassembly is complete, calling on_receive_func.");
+
                     auto istream = ibytestream(assembler.data(), assembler.data() + assembler.size());
                     on_receive_func(istream);
                 }

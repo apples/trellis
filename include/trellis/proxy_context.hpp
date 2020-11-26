@@ -72,6 +72,8 @@ private:
     // Client => Server
     void receive() {
         proxy_socket.async_receive_from(asio::buffer(proxy_buffer.data), sender_endpoint, [this](asio::error_code ec, std::size_t size) {
+            TRELLIS_BEGIN_SECTION("proxy");
+
             if (ec.value() == asio::error::operation_aborted || !running) {
                 std::cerr << "[trellis] PROXY shutting down" << std::endl;
                 return;
@@ -131,6 +133,8 @@ private:
                     }
                 });
             }
+
+            TRELLIS_END_SECTION("proxy");
 
             receive();
         });

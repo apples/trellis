@@ -68,6 +68,8 @@ public:
 
 private:
     void receive(const datagram_buffer& buffer, const typename protocol::endpoint& sender_endpoint, std::size_t size) {
+        TRELLIS_BEGIN_SECTION("client");
+
         assert(conn);
 
         if (sender_endpoint != conn->get_endpoint()) {
@@ -149,6 +151,8 @@ private:
                 break;
             }
         }
+
+        TRELLIS_END_SECTION("client");
     }
 
     void kill(connection_type& c) {

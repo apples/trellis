@@ -68,6 +68,8 @@ public:
 
 private:
     void receive(const datagram_buffer& buffer, const typename protocol::endpoint& sender_endpoint, std::size_t size) {
+        TRELLIS_BEGIN_SECTION("server");
+
         auto type = headers::type{};
 
         std::memcpy(&type, buffer.data.data(), sizeof(headers::type));
@@ -148,6 +150,8 @@ private:
 
                         auto& receive_func = this->get_receive_func(header.channel_id);
 
+                        TRELLIS_LOG_FRAGMENT("server", header.fragment_id, header.fragment_count);
+
                         conn->receive(header, buffer, size, [this, &receive_func, &conn](std::istream& s) {
                             receive_func(*this, conn, s);
                         }, [this, &conn] {
@@ -168,6 +172,8 @@ private:
                 break;
             }
         }
+
+        TRELLIS_END_SECTION("server");
     }
 
     void kill(connection_type& conn) {
