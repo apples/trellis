@@ -22,21 +22,18 @@ inline constexpr auto sequence_id_less(config::sequence_id_t a, config::sequence
     return (a != b) && (b - a <= max_gap);
 }
 
-template <typename Connection, typename ChannelDef>
-class channel;
+// Unreliable Unordered
 
-template <typename Connection, typename Tag>
-class channel<Connection, channel_type_unreliable_unordered<Tag>> {
+/** Channel implementing an unreliable unordered protocol. */
+class channel_unreliable_unordered {
 public:
-    using connection_type = Connection;
-
-    channel(connection_type& conn) :
+    channel_unreliable_unordered(connection_base& conn) :
         conn(&conn),
         sequence_id(0),
         assemblers() {}
 
-    channel(const channel&) = delete;
-    channel(channel&&) = delete;
+    channel_unreliable_unordered(const channel_unreliable_unordered&) = delete;
+    channel_unreliable_unordered(channel_unreliable_unordered&&) = delete;
 
     auto next_sequence_id() -> config::sequence_id_t {
         return sequence_id++;
@@ -104,26 +101,30 @@ public:
     }
 
 private:
-    connection_type* conn;
+    connection_base* conn;
     config::sequence_id_t sequence_id;
     std::array<fragment_assembler, config::assembler_slots> assemblers;
 };
 
-template <typename Connection, typename Tag>
-class channel<Connection, channel_type_reliable_ordered<Tag>> {
-public:
-    using connection_type = Connection;
-    using timer_type = typename connection_type::timer_type;
+// Reliable Ordered
 
-    channel(connection_type& conn) :
+/**
+ * Channel implementing a reliable ordered protocol.
+ * NOTE: Currently susceptible to unbounded memory usage.
+ */
+class channel_reliable_ordered {
+public:
+    using timer_type = connection_base::timer_type;
+
+    channel_reliable_ordered(connection_base& conn) :
         conn(&conn),
         sequence_id(0),
         incoming_sequence_id(0),
         assemblers(),
         outgoing_queue(conn.get_context().get_io(), [this](const outgoing_entry& e){ send_outgoing(e); }) {}
 
-    channel(const channel&) = delete;
-    channel(channel&&) = delete;
+    channel_reliable_ordered(const channel_reliable_ordered&) = delete;
+    channel_reliable_ordered(channel_reliable_ordered&&) = delete;
 
     auto next_sequence_id() -> config::sequence_id_t {
         return sequence_id++;
@@ -232,11 +233,29 @@ private:
         conn->send_raw(entry.datagram, entry.size);
     }
 
-    connection_type* conn;
+    connection_base* conn;
     config::sequence_id_t sequence_id;
     config::sequence_id_t incoming_sequence_id;
     std::unordered_map<config::sequence_id_t, fragment_assembler> assemblers;
     retry_queue<outgoing_entry, timer_type> outgoing_queue;
+};
+
+// Templated
+
+/** Connection-specific channel type. */
+template <typename Connection, typename ChannelDef>
+class channel;
+
+template <typename Connection, typename Tag>
+class channel<Connection, channel_type_unreliable_unordered<Tag>> : public channel_unreliable_unordered {
+public:
+    using channel_unreliable_unordered::channel_unreliable_unordered;
+};
+
+template <typename Connection, typename Tag>
+class channel<Connection, channel_type_reliable_ordered<Tag>> : public channel_reliable_ordered {
+public:
+    using channel_reliable_ordered::channel_reliable_ordered;
 };
 
 } // namespace trellis

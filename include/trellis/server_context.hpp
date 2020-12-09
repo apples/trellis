@@ -1,6 +1,6 @@
 #pragma once
 
-#include "base_context.hpp"
+#include "context_crtp.hpp"
 #include "channel.hpp"
 #include "connection.hpp"
 #include "datagram.hpp"
@@ -16,10 +16,11 @@
 
 namespace trellis {
 
+/** A server implementation that can have any number of connected clients. */
 template <typename... Channels>
-class server_context : public base_context<server_context<Channels...>> {
+class server_context final : public context_crtp<server_context<Channels...>> {
 public:
-    using base_type = base_context<server_context>;
+    using base_type = context_crtp<server_context>;
     using connection_type = connection<server_context>;
 
     friend base_type;
@@ -65,7 +66,23 @@ public:
         on_connect_func = std::move(func);
     }
 
+protected:
+    virtual void kill(const connection_base& conn) override {
+        auto endpoint = conn.get_endpoint();
+        auto iter = active_connections.find(endpoint);
+        kill_iter(iter);
+    }
+
 private:
+    void kill_iter(typename connection_map::iterator iter) {
+        // By contract, this function should never be called with an invalid iterator.
+        assert(iter != active_connections.end());
+
+        TRELLIS_LOG_ACTION("server", get_context_id(), "Killing connection ", iter->second->get_endpoint());
+
+        active_connections.erase(iter);
+    }
+
     void receive(const datagram_buffer& buffer, const typename protocol::endpoint& sender_endpoint, std::size_t size) {
         TRELLIS_BEGIN_SECTION("server");
 
@@ -208,26 +225,6 @@ private:
         }
 
         TRELLIS_END_SECTION("server");
-    }
-
-    void kill_iter(typename connection_map::iterator iter) {
-        // By contract, this function should never be called with an invalid iterator.
-        assert(iter != active_connections.end());
-
-        TRELLIS_LOG_ACTION("server", get_context_id(), "Killing connection ", iter->second->get_endpoint());
-
-        active_connections.erase(iter);
-    }
-
-    void kill(const connection_type& conn) {
-        auto endpoint = conn.get_endpoint();
-        typename connection_map::iterator iter = active_connections.find(endpoint);
-        // By contract, this function should never be called with an invalid iterator.
-        assert(iter != active_connections.end());
-
-        TRELLIS_LOG_ACTION("server", get_context_id(), "Killing connection ", iter->second->get_endpoint());
-
-        active_connections.erase(iter);
     }
 
     connection_map active_connections;

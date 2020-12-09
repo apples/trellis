@@ -7,6 +7,7 @@
 
 namespace trellis {
 
+/** Implements a time-delayed priority queue. */
 template <typename T, typename C, typename F = std::function<void(const T&)>>
 class retry_queue {
 public:
@@ -38,6 +39,7 @@ public:
         reset_timer();
     }
 
+    /** Removes the first instance of a queue item where the predicate returns true. */
     template <typename G>
     bool remove_if(const G& pred) {
         if (queue.empty()) return false;

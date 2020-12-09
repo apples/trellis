@@ -1,6 +1,6 @@
 #pragma once
 
-#include "base_context.hpp"
+#include "context_crtp.hpp"
 #include "connection.hpp"
 #include "datagram.hpp"
 #include "message_header.hpp"
@@ -14,10 +14,11 @@
 
 namespace trellis {
 
+/** A client context that connects to only one server. */
 template <typename... Channels>
-class client_context : public base_context<client_context<Channels...>> {
+class client_context final : public context_crtp<client_context<Channels...>> {
 public:
-    using base_type = base_context<client_context>;
+    using base_type = context_crtp<client_context>;
     using connection_type = connection<client_context>;
 
     friend base_type;
@@ -62,6 +63,15 @@ public:
 
     void on_connect(connect_function func) {
         on_connect_func = std::move(func);
+    }
+
+protected:
+    virtual void kill(const connection_base& c) override {
+        assert(&c == conn.get());
+        TRELLIS_LOG_ACTION("client", get_context_id(), "Killing connection to ", conn->get_endpoint());
+
+        conn = nullptr;
+        this->stop();
     }
 
 private:
@@ -173,14 +183,6 @@ private:
         }
 
         TRELLIS_END_SECTION("client");
-    }
-
-    void kill(connection_type& c) {
-        assert(&c == conn.get());
-        TRELLIS_LOG_ACTION("client", get_context_id(), "Killing connection to ", conn->get_endpoint());
-
-        conn = nullptr;
-        this->stop();
     }
 
     connect_function on_connect_func;
