@@ -2,7 +2,7 @@
 
 #include <trellis/trellis.hpp>
 
-using channel_numbers = trellis::channel_def<struct numbers_t, false, false>;
+using channel_numbers = trellis::channel_type_reliable_ordered<struct numbers_t>;
 
 template <template <typename...> class T>
 using apply_channels = T<channel_numbers>;

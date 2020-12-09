@@ -119,7 +119,7 @@ public:
 
         auto new_pos = off;
 
-        if (new_pos > payload_size * fragments.size()) {
+        if (new_pos > pos_type(payload_size * fragments.size())) {
             return pos_type(off_type(-1));
         }
 
@@ -159,7 +159,7 @@ public:
     template <typename Channel>
     void send() {
         auto total_size = std::max(off_type(max_pos), off_type(seekoff(0, std::ios_base::cur, std::ios_base::out)));
-        assert(total_size <= (fragments_back - fragments.begin()) * payload_size);
+        assert(total_size <= off_type((fragments_back - fragments.begin()) * payload_size));
 
         auto last_payload_size = total_size % payload_size;
         assert(last_payload_size <= payload_size);

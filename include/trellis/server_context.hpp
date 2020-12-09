@@ -20,7 +20,7 @@ template <typename... Channels>
 class server_context : public base_context<server_context<Channels...>> {
 public:
     using base_type = base_context<server_context>;
-    using typename base_type::connection_type;
+    using connection_type = connection<server_context>;
 
     friend base_type;
     friend connection_type;
@@ -29,7 +29,6 @@ public:
     using typename base_type::protocol;
     using typename base_type::traits;
 
-    using channel_state_tuple = std::tuple<channel<Channels>...>;
     using connection_map = std::map<typename protocol::endpoint, std::shared_ptr<connection_type>>;
 
     using connect_function = std::function<void(server_context&, const std::shared_ptr<connection_type>&)>;
@@ -133,7 +132,7 @@ private:
                 if (iter != active_connections.end()) {
                     TRELLIS_LOG_ACTION("server", get_context_id(), "DISCONNECT from client ", sender_endpoint, ". Killing connection.");
 
-                    kill(iter);
+                    kill_iter(iter);
                 } else {
                     TRELLIS_LOG_ACTION("server", get_context_id(), "Unexpected DISCONNECT from unknown client ", sender_endpoint);
                 }
@@ -146,11 +145,17 @@ private:
                     if (conn->get_state() == connection_state::PENDING || conn->get_state() == connection_state::ESTABLISHED) {
                         auto header = headers::data{};
                         std::memcpy(&header, buffer.data.data() + sizeof(headers::type), sizeof(headers::data));
-                        assert(header.channel_id < sizeof...(Channels));
+
+                        if (header.channel_id >= sizeof...(Channels)) {
+                            TRELLIS_LOG_ACTION("server", get_context_id(), "DATA received with invalid channel_id. Disconnecting.");
+
+                            conn->disconnect();
+                            break;
+                        }
 
                         auto& receive_func = this->get_receive_func(header.channel_id);
 
-                        TRELLIS_LOG_FRAGMENT("server", header.fragment_id, header.fragment_count);
+                        TRELLIS_LOG_FRAGMENT("server", +header.fragment_id, +header.fragment_count);
 
                         conn->receive(header, buffer, size, [this, &receive_func, &conn](std::istream& s) {
                             receive_func(*this, conn, s);
@@ -171,16 +176,52 @@ private:
 
                 break;
             }
+            case headers::type::DATA_ACK: {
+                if (iter != active_connections.end()) {
+                    auto& conn = iter->second;
+
+                    if (conn->get_state() == connection_state::ESTABLISHED) {
+                        auto header = headers::data_ack{};
+                        std::memcpy(&header, buffer.data.data() + sizeof(headers::type), sizeof(headers::data_ack));
+
+                        TRELLIS_LOG_FRAGMENT("server", +header.fragment_id, "?");
+
+                        if (header.channel_id >= sizeof...(Channels)) {
+                            TRELLIS_LOG_ACTION("server", get_context_id(), "DATA_ACK received with invalid channel_id. Disconnecting.");
+
+                            conn->disconnect();
+                            break;
+                        }
+
+                        conn->receive_ack(header);
+                    } else {
+                        TRELLIS_LOG_ACTION("server", get_context_id(), "Unexpected DATA_ACK from client ", sender_endpoint, ", which has not completed the handshake. Disconnecting.");
+
+                        conn->disconnect();
+                    }
+                } else {
+                    TRELLIS_LOG_ACTION("server", get_context_id(), "Unexpected DATA_ACK from unknown client ", sender_endpoint, ". Ignoring.");
+                }
+
+                break;
+            }
         }
 
         TRELLIS_END_SECTION("server");
     }
 
-    void kill(connection_type& conn) {
-        kill(active_connections.find(conn.get_endpoint()));
+    void kill_iter(typename connection_map::iterator iter) {
+        // By contract, this function should never be called with an invalid iterator.
+        assert(iter != active_connections.end());
+
+        TRELLIS_LOG_ACTION("server", get_context_id(), "Killing connection ", iter->second->get_endpoint());
+
+        active_connections.erase(iter);
     }
 
-    void kill(const typename connection_map::iterator& iter) {
+    void kill(const connection_type& conn) {
+        auto endpoint = conn.get_endpoint();
+        typename connection_map::iterator iter = active_connections.find(endpoint);
         // By contract, this function should never be called with an invalid iterator.
         assert(iter != active_connections.end());
 

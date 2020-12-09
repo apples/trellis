@@ -1,7 +1,6 @@
 #pragma once
 
 #include "base_context.hpp"
-#include "channel.hpp"
 #include "connection.hpp"
 #include "datagram.hpp"
 #include "message_header.hpp"
@@ -19,7 +18,7 @@ template <typename... Channels>
 class client_context : public base_context<client_context<Channels...>> {
 public:
     using base_type = base_context<client_context>;
-    using typename base_type::connection_type;
+    using connection_type = connection<client_context>;
 
     friend base_type;
     friend connection_type;
@@ -28,7 +27,6 @@ public:
     using typename base_type::protocol;
     using typename base_type::traits;
 
-    using channel_state_tuple = std::tuple<channel<Channels>...>;
     using connect_function = std::function<void(client_context&, const std::shared_ptr<connection_type>&)>;
     using receive_function = std::function<void(client_context&, const std::shared_ptr<connection_type>&, std::istream&)>;
 
@@ -147,6 +145,28 @@ private:
                     conn->disconnect();
                     assert(false);
                 });
+
+                break;
+            }
+            case headers::type::DATA_ACK: {
+                if (conn->get_state() != connection_state::ESTABLISHED) {
+                    TRELLIS_LOG_ACTION("client", get_context_id(), "DATA_ACK received from server ", sender_endpoint, " before being ESTABLISHED. Disconnecting.");
+
+                    conn->disconnect();
+                    break;
+                }
+
+                auto header = headers::data_ack{};
+                std::memcpy(&header, buffer.data.data() + sizeof(headers::type), sizeof(headers::data_ack));
+
+                if (header.channel_id >= sizeof...(Channels)) {
+                    TRELLIS_LOG_ACTION("client", get_context_id(), "DATA_ACK received with invalid channel_id. Disconnecting.");
+
+                    conn->disconnect();
+                    break;
+                }
+
+                conn->receive_ack(header);
 
                 break;
             }

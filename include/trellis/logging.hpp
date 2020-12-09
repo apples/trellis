@@ -38,9 +38,9 @@
         std::clog.copyfmt(fmt);                                                 \
     }((NOTE), (DGRAM), (COUNT)))
 
-#define TRELLIS_LOG_FRAGMENT(NOTE, N, COUNT)                                                               \
-    ([](auto&& note, auto&& n, auto&& count) {                                                             \
-        std::clog << "[trellis] FRAGMENT (" << note << ") " << int(n) << " / " << int(count) << std::endl; \
+#define TRELLIS_LOG_FRAGMENT(NOTE, N, COUNT)                                                     \
+    ([](auto&& note, auto&& n, auto&& count) {                                                   \
+        std::clog << "[trellis] FRAGMENT (" << note << ") " << n << " / " << count << std::endl; \
     }((NOTE), (N), (COUNT)))
 
 #else

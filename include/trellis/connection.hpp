@@ -4,6 +4,7 @@
 #include "context_traits.hpp"
 #include "logging.hpp"
 #include "message_header.hpp"
+#include "utility.hpp"
 
 #include <asio.hpp>
 
@@ -31,23 +32,31 @@ class connection : public std::enable_shared_from_this<connection<Context>> {
 public:
     friend Context;
 
+    template <typename Connection, typename Channel>
+    friend class channel;
+
+    using timer_type = asio::steady_timer;
+
     using context_type = Context;
     using traits = context_traits<context_type>;
     using protocol_type = typename context_type::protocol;
     using endpoint_type = typename protocol_type::endpoint;
-    using channel_state_tuple = typename context_type::channel_state_tuple;
+    using channel_state_tuple = typename traits::channel_tuple<channel, connection>;
 
-    using std::enable_shared_from_this<connection>::shared_from_this;
+    using std::enable_shared_from_this<connection<Context>>::shared_from_this;
 
     connection(context_type& context, endpoint_type client_endpoint) :
         context(&context),
         client_endpoint(client_endpoint),
         state(connection_state::INACTIVE),
         connection_id(std::uniform_int_distribution<std::uint16_t>{}(context.get_rng())),
-        channels(),
+        channels(tuple_constructor<channel_state_tuple>{}(*this)),
         handshake(std::nullopt) {
             TRELLIS_LOG_ACTION("conn", connection_id, "Connection constructed.");
         }
+
+    connection(const connection&) = delete;
+    connection(connection&&) = delete;
 
     auto get_context() -> context_type& {
         return *context;
@@ -73,6 +82,8 @@ public:
         auto num_fragments = e - b;
         auto sid = channel.next_sequence_id();
 
+        assert(num_fragments <= std::numeric_limits<config::fragment_id_t>::max());
+
         TRELLIS_LOG_ACTION("conn", connection_id, "Sending data (sid:", sid, ",fragments:", num_fragments, ",lps:", last_payload_size, ")");
 
         for (auto iter = b; iter != e; ++iter) {
@@ -88,9 +99,9 @@ public:
             std::memcpy(buffer.data() + sizeof(type), &header, sizeof(headers::data));
 
             if (iter == e - 1) {
-                send_raw(buffer, last_payload_size + headers::data_offset);
+                channel.send_packet(header, buffer, last_payload_size + headers::data_offset);
             } else {
-                send_raw(buffer, config::datagram_size);
+                channel.send_packet(header, buffer, config::datagram_size);
             }
         }
     }
@@ -116,16 +127,19 @@ public:
 
         TRELLIS_LOG_DATAGRAM("d/cn", buffer, sizeof(type));
 
-        context->get_socket().async_send_to(buffer.buffer(sizeof(type)), client_endpoint, [buffer, func, ptr = this->shared_from_this()](asio::error_code ec, std::size_t size) {
-            TRELLIS_LOG_ACTION("conn", ptr->connection_id, "Sent DISCONNECT successfully, killing connection.");
-            ptr->context->kill(*ptr);
-            func();
-        });
+        context->get_socket().async_send_to(
+            buffer.buffer(sizeof(type)),
+            client_endpoint,
+            [buffer, func, ptr = this->shared_from_this()]([[maybe_unused]] asio::error_code ec, [[maybe_unused]] std::size_t size) {
+                TRELLIS_LOG_ACTION("conn", ptr->connection_id, "Sent DISCONNECT successfully, killing connection.");
+                ptr->context->kill(*ptr);
+                func();
+            });
     }
 
 private:
     struct handshake_state {
-        asio::steady_timer timer;
+        timer_type timer;
         shared_datagram_buffer buffer;
     };
 
@@ -322,13 +336,30 @@ private:
         context->kill(*this);
     }
 
-    /** Sends a DATA datagram and frees the buffer when done. */
+    /** Sends a DATA_ACK. */
+    void send_ack(std::uint8_t cid, config::sequence_id_t sid, config::fragment_id_t fid) {
+        if (state == connection_state::DISCONNECTED) return;
+
+        TRELLIS_LOG_ACTION("conn", connection_id, "Sending DATA_ACK (cid:", cid, ",sid:", sid, ",fid:", fid, ").");
+
+        auto buffer = context->make_pending_buffer();
+        auto type = headers::type::DATA_ACK;
+        auto header = headers::data_ack{sid, cid, fid};
+        constexpr auto size = sizeof(type) + sizeof(header);
+
+        std::memcpy(buffer.data(), &type, sizeof(type));
+        std::memcpy(buffer.data() + sizeof(type), &header, sizeof(header));
+
+        send_raw(buffer, size);
+    }
+
+    /** Sends a datagram. */
     void send_raw(const shared_datagram_buffer& data, std::size_t count) {
         if (state == connection_state::DISCONNECTED) return;
 
-        TRELLIS_LOG_DATAGRAM("send", data, count);
+        TRELLIS_LOG_DATAGRAM("send_raw", data, count);
 
-        context->get_socket().async_send_to(data.buffer(count), client_endpoint, [data, ptr = shared_from_this()](asio::error_code ec, std::size_t size) {
+        context->get_socket().async_send_to(data.buffer(count), client_endpoint, [data, ptr = shared_from_this()](asio::error_code ec, [[maybe_unused]] std::size_t size) {
             if (ec) {
                 std::cerr << "Error: " << ec.category().name() << ": " << ec.message() << std::endl;
                 ptr->disconnect();
@@ -363,6 +394,22 @@ private:
         assert(state == connection_state::ESTABLISHED);
 
         ((Is == header.channel_id ? (std::get<Is>(channels).receive(header, datagram, count, data_handler), true) : false) || ...);
+    }
+
+    /**
+     * Receives a DATA_ACK datagram.
+     */
+    void receive_ack(const headers::data_ack& header) {
+        receive_ack(header, std::make_index_sequence<std::tuple_size_v<channel_state_tuple>>{});
+    }
+
+    /** Do not use. Call the other overload instead. */
+    template <std::size_t... Is>
+    void receive_ack(const headers::data_ack& header, std::index_sequence<Is...>) {
+        // Only ESTABLISHED connections should receive DATA_ACK messages.
+        assert(state == connection_state::ESTABLISHED);
+
+        ((Is == header.channel_id ? (std::get<Is>(channels).receive_ack(header), true) : false) || ...);
     }
 
     context_type* context;

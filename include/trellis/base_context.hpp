@@ -27,8 +27,6 @@ public:
     using protocol = asio::ip::udp;
     using receive_function = std::function<void(derived_type&, const connection_ptr&, std::istream&)>;
 
-    friend connection_type;
-
     base_context(asio::io_context& io) :
         io(&io),
         socket(io),
@@ -93,7 +91,7 @@ protected:
 
     auto get_receive_func(int channel_id) -> const receive_function& {
         assert(channel_id >= 0);
-        assert(channel_id < receive_funcs.size());
+        assert(channel_id < int(receive_funcs.size()));
 
         auto& func = receive_funcs[channel_id];
 

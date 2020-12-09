@@ -34,13 +34,13 @@ int main() {
     auto server = server_context(io);
     auto proxy = proxy_context(io);
 
-    auto responses = std::array<bool, 20>{};
+    auto responses = std::array<bool, 50>{};
 
     auto timer = asio::steady_timer(io, std::chrono::seconds{5});
 
     timer.async_wait([&](asio::error_code ec) {
         assert(!ec);
-        for (int i = 0; i < responses.size(); ++i) {
+        for (auto i = 0u; i < responses.size(); ++i) {
             std::cout << "Response " << std::setw(2) << ": " << (responses[i] ? "YES" : "NO") << std::endl;
         }
         client.stop();
@@ -50,7 +50,7 @@ int main() {
 
     std::cout << "Connecting..." << std::endl;
 
-    server.on_receive<channel_numbers>([](server_context& server, const server_context::connection_ptr& conn, std::istream& packet) {
+    server.on_receive<channel_numbers>([](server_context&, const server_context::connection_ptr& conn, std::istream& packet) {
         auto message = message_numbers{};
 
         {
@@ -79,11 +79,11 @@ int main() {
     proxy.set_server_drop_rate(0.5);
 
     client.connect({asio::ip::udp::v4(), 0}, proxy.get_endpoint());
-    client.on_connect([&](client_context& context, const client_context::connection_ptr& conn) {
+    client.on_connect([&](client_context&, const client_context::connection_ptr& conn) {
         std::cout << "Connection success" << std::endl;
         std::cout << "Sending message_numbers..." << std::endl;
 
-        for (int n = 0; n < responses.size(); ++n) {
+        for (auto n = 0; n < int(responses.size()); ++n) {
             auto ostream = trellis::opacketstream(*conn);
 
             {
@@ -98,7 +98,7 @@ int main() {
 
     std::cout << "client_endpoint: " << client.get_endpoint() << std::endl;
 
-    client.on_receive<channel_numbers>([&](client_context& client, const client_context::connection_ptr& conn, std::istream& packet) {
+    client.on_receive<channel_numbers>([&](client_context&, const client_context::connection_ptr&, std::istream& packet) {
         auto message = message_numbers{};
 
         {

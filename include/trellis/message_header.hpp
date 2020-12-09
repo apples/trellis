@@ -1,5 +1,7 @@
 #pragma once
 
+#include "config.hpp"
+
 #include <cstdint>
 #include <variant>
 
@@ -11,6 +13,7 @@ enum type : std::uint8_t {
     CONNECT_ACK,
     DISCONNECT,
     DATA,
+    DATA_ACK,
 };
 
 struct connect {
@@ -28,10 +31,16 @@ struct disconnect {
 };
 
 struct data {
-    std::uint16_t sequence_id;
+    config::sequence_id_t sequence_id;
     std::uint8_t channel_id;
-    std::uint8_t fragment_count;
-    std::uint8_t fragment_id;
+    config::fragment_id_t fragment_count;
+    config::fragment_id_t fragment_id;
+};
+
+struct data_ack {
+    config::sequence_id_t sequence_id;
+    std::uint8_t channel_id;
+    config::fragment_id_t fragment_id;
 };
 
 constexpr std::size_t data_offset = sizeof(type) + sizeof(data);
