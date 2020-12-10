@@ -95,6 +95,15 @@ public:
         return complete.test(id);
     }
 
+    void cancel() {
+        buffer.reset();
+        buffer_capacity = 0;
+    }
+
+    bool is_cancelled() const {
+        return sequence_id && !buffer;
+    }
+
 private:
     std::optional<config::sequence_id_t> sequence_id;
     std::unique_ptr<char[]> buffer;

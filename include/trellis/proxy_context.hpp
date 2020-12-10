@@ -19,6 +19,13 @@ class proxy_context {
 public:
     using protocol = asio::ip::udp;
 
+    struct proxy_stats {
+        int client_messages = 0;
+        int client_messages_dropped = 0;
+        int server_messages = 0;
+        int server_messages_dropped = 0;
+    };
+
     proxy_context(asio::io_context& io) :
         io(&io),
         proxy_socket(io),
@@ -28,7 +35,8 @@ public:
         running(false),
         rng(std::random_device{}()),
         client_drop_rate(0),
-        server_drop_rate(0) {}
+        server_drop_rate(0),
+        stats{} {}
 
     void listen(const protocol::endpoint& proxy_endpoint, const protocol::endpoint& remote_endpoint) {
         proxy_socket.open(proxy_endpoint.protocol());
@@ -61,6 +69,10 @@ public:
         server_drop_rate = chance;
     }
 
+    auto get_stats() const -> const proxy_stats& {
+        return stats;
+    }
+
 private:
     struct proxy_connection {
         protocol::endpoint client_endpoint;
@@ -82,6 +94,8 @@ private:
                 receive();
                 return;
             }
+
+            ++stats.client_messages;
 
             TRELLIS_LOG_DATAGRAM("prox", proxy_buffer.data, size);
 
@@ -118,6 +132,7 @@ private:
 
             if (drop_roll < client_drop_rate) {
                 std::cout << "[trellis] PROXY dropped" << std::endl;
+                ++stats.client_messages_dropped;
             } else {
                 std::cout << "[trellis] PROXY client " << iter->second.client_endpoint << " == " << iter->second.socket.local_endpoint() << " => server " << remote_endpoint << std::endl;
 
@@ -151,6 +166,8 @@ private:
                 return;
             }
 
+            ++stats.server_messages;
+
             TRELLIS_LOG_DATAGRAM("prox", conn.buffer.data, size);
 
             assert(conn.sender_endpoint == remote_endpoint);
@@ -159,6 +176,7 @@ private:
 
             if (drop_roll < server_drop_rate) {
                 std::cout << "[trellis] PROXY dropped" << std::endl;
+                ++stats.server_messages_dropped;
             } else {
                 std::cout << "[trellis] PROXY server " << remote_endpoint << " == " << proxy_socket.local_endpoint() << " => client " << conn.client_endpoint << std::endl;
 
@@ -190,6 +208,7 @@ private:
     std::mt19937 rng;
     double client_drop_rate;
     double server_drop_rate;
+    proxy_stats stats;
 };
 
 } // namespace trellis

@@ -34,22 +34,28 @@ int main() {
     auto server = server_context(io);
     auto proxy = proxy_context(io);
 
-    auto responses = std::array<bool, 50>{};
+    auto responses = std::array<bool, 10>{};
     auto response_order = std::vector<int>{};
-    response_order.reserve(50);
+    response_order.reserve(10);
 
-    auto timer = asio::steady_timer(io, std::chrono::seconds{5});
+    auto timer = asio::steady_timer(io, std::chrono::seconds{15});
 
-    timer.async_wait([&](asio::error_code ec) {
-        assert(!ec);
+    timer.async_wait([&]([[maybe_unused]] asio::error_code ec) {
         for (auto i = 0u; i < responses.size(); ++i) {
             std::cout << "Response " << std::setw(2) << ": " << (responses[i] ? "YES" : "NO") << "\n";
         }
+
         std::cout << "Response order:\n";
         for (auto i = 0u; i < response_order.size(); ++i) {
             std::cout << "  " << response_order[i] << "\n";
         }
+
+        std::cout << "Proxy stats:\n";
+        std::cout << "  Client messages: " << proxy.get_stats().client_messages << " (" << proxy.get_stats().client_messages_dropped << " dropped)\n";
+        std::cout << "  Server messages: " << proxy.get_stats().server_messages << " (" << proxy.get_stats().server_messages_dropped << " dropped)\n";
+
         std::cout << std::flush;
+
         client.stop();
         server.stop();
         proxy.stop();
@@ -115,8 +121,14 @@ int main() {
 
         std::cout << "Client received message " << message.number << ", important message " << (message.padding == important_message ? "survived." : "was lost.") << std::endl;
 
+        assert(!responses[message.number]);
+
         responses[message.number] = true;
         response_order.push_back(message.number);
+
+        if (response_order.size() == responses.size()) {
+            timer.cancel();
+        }
     });
 
     io.run();

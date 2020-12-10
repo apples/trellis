@@ -30,6 +30,7 @@ class connection_base : public std::enable_shared_from_this<connection_base> {
 public:
     friend class channel_unreliable_unordered;
     friend class channel_reliable_ordered;
+    friend class channel_reliable_unordered;
 
     using protocol = context_base::protocol;
     using timer_type = asio::steady_timer;
