@@ -30,7 +30,6 @@ public:
         buffer_capacity(num_fragments * fragment_size),
         complete{} {
             assert(sequence_id);
-            assert(num_fragments >= 2);
             assert(buffer);
             assert(complete.count() == 0);
         }

@@ -87,7 +87,6 @@ private:
             TRELLIS_BEGIN_SECTION("proxy");
 
             if (ec.value() == asio::error::operation_aborted || !running) {
-                std::cerr << "[trellis] PROXY shutting down" << std::endl;
                 return;
             } else if (ec) {
                 std::cerr << "[trellis] PROXY ERROR receive: " << ec.category().name() << ": " << ec.message() << std::endl;
@@ -102,7 +101,7 @@ private:
             auto iter = connections.find(sender_endpoint);
 
             if (iter == connections.end()) {
-                std::cout << "[trellis] PROXY new client " << sender_endpoint << std::endl;
+                TRELLIS_LOG_ACTION("proxy", sender_endpoint, "New client");
 
                 auto conn = proxy_connection{
                     sender_endpoint,
@@ -131,10 +130,10 @@ private:
             auto drop_roll = std::uniform_real_distribution<>{0.0, 1.0}(rng);
 
             if (drop_roll < client_drop_rate) {
-                std::cout << "[trellis] PROXY dropped" << std::endl;
+                TRELLIS_LOG_ACTION("proxy", iter->second.client_endpoint, "Dropped packet");
                 ++stats.client_messages_dropped;
             } else {
-                std::cout << "[trellis] PROXY client " << iter->second.client_endpoint << " == " << iter->second.socket.local_endpoint() << " => server " << remote_endpoint << std::endl;
+                TRELLIS_LOG_ACTION("proxy", iter->second.client_endpoint, "Sending client ", iter->second.client_endpoint, " == ", iter->second.socket.local_endpoint(), " => server ", remote_endpoint);
 
                 auto buffer = cache.make_pending_buffer();
 
@@ -175,10 +174,10 @@ private:
             auto drop_roll = std::uniform_real_distribution<>{0.0, 1.0}(rng);
 
             if (drop_roll < server_drop_rate) {
-                std::cout << "[trellis] PROXY dropped" << std::endl;
+                TRELLIS_LOG_ACTION("proxy", -1, "Dropped packet");
                 ++stats.server_messages_dropped;
             } else {
-                std::cout << "[trellis] PROXY server " << remote_endpoint << " == " << proxy_socket.local_endpoint() << " => client " << conn.client_endpoint << std::endl;
+                TRELLIS_LOG_ACTION("proxy", -1, "Sending server ", remote_endpoint, " == ", proxy_socket.local_endpoint(), " => client ", conn.client_endpoint);
 
                 auto buffer = cache.make_pending_buffer();
 

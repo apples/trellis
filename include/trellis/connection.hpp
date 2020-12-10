@@ -24,7 +24,7 @@ public:
 
     using context_type = Context;
     using traits = context_traits<context_type>;
-    using channel_state_tuple = typename traits::channel_tuple<channel, connection>;
+    using channel_state_tuple = typename traits::template channel_tuple<channel, connection>;
 
     connection(context_type& context, const protocol::endpoint& client_endpoint) :
         connection_base(context, client_endpoint),

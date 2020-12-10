@@ -114,7 +114,7 @@ public:
                     assert(i >= 0 && i < count);
                     assert(i_parent() == i || queue[i_parent()] <= queue[i]);
 
-                    auto child = std::optional<int>{};
+                    auto child = std::optional<std::ptrdiff_t>{};
 
                     if (i_left() < count && queue[i_left()] < queue[i]) {
                         child = i_left();
