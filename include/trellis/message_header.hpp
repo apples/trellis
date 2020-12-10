@@ -39,6 +39,7 @@ struct data {
 
 struct data_ack {
     config::sequence_id_t sequence_id;
+    config::sequence_id_t expected_sequence_id;
     std::uint8_t channel_id;
     config::fragment_id_t fragment_id;
 };

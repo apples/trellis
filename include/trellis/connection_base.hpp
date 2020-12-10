@@ -308,14 +308,14 @@ protected:
     }
 
     /** Sends a DATA_ACK. */
-    void send_ack(std::uint8_t cid, config::sequence_id_t sid, config::fragment_id_t fid) {
+    void send_ack(std::uint8_t cid, config::sequence_id_t sid, config::sequence_id_t eid, config::fragment_id_t fid) {
         if (state == connection_state::DISCONNECTED) return;
 
         TRELLIS_LOG_ACTION("conn", connection_id, "Sending DATA_ACK (cid:", cid, ",sid:", sid, ",fid:", fid, ").");
 
         auto buffer = context->make_pending_buffer();
         auto type = headers::type::DATA_ACK;
-        auto header = headers::data_ack{sid, cid, fid};
+        auto header = headers::data_ack{sid, eid, cid, fid};
         constexpr auto size = sizeof(type) + sizeof(header);
 
         std::memcpy(buffer.data(), &type, sizeof(type));

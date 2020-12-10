@@ -120,6 +120,7 @@ public:
         conn(&conn),
         sequence_id(0),
         incoming_sequence_id(0),
+        last_expected_sequence_id(0),
         assemblers(),
         outgoing_queue(conn.get_context().get_io(), [this](const outgoing_entry& e){ send_outgoing(e); }) {}
 
@@ -148,10 +149,9 @@ public:
 
         TRELLIS_LOG_ACTION("channel", +header.channel_id, "Processing message ", header.sequence_id, " as fragment piece ", +header.fragment_id, " / ", +header.fragment_count, ".");
 
-        conn->send_ack(header.channel_id, header.sequence_id, header.fragment_id);
-
         if (sequence_id_less(header.sequence_id, incoming_sequence_id)) {
             TRELLIS_LOG_ACTION("channel", +header.channel_id, "Message ", header.sequence_id, ", fragment piece ", +header.fragment_id, " received duplicate. Expected: ", incoming_sequence_id, ".");
+            conn->send_ack(header.channel_id, header.sequence_id, incoming_sequence_id, header.fragment_id);
             return;
         }
 
@@ -205,14 +205,28 @@ public:
                 }
             }
         }
+
+        conn->send_ack(header.channel_id, header.sequence_id, incoming_sequence_id, header.fragment_id);
     }
 
     void receive_ack(const headers::data_ack& header) {
         TRELLIS_LOG_ACTION("channel", +header.channel_id, "Received DATA_ACK (sid:", header.sequence_id, ",fid:", +header.fragment_id, ").");
 
-        auto success = outgoing_queue.remove_if([&](const outgoing_entry& e) {
-            return e.header.sequence_id == header.sequence_id && e.header.fragment_id == header.fragment_id;
-        });
+        [[maybe_unused]] auto success = false;
+
+        if (sequence_id_less(last_expected_sequence_id, header.expected_sequence_id)) {
+            success = outgoing_queue.remove_all_if([&](const outgoing_entry& e) {
+                return
+                    sequence_id_less(e.header.sequence_id, header.expected_sequence_id) ||
+                    (e.header.sequence_id == header.sequence_id && e.header.fragment_id == header.fragment_id);
+            });
+
+            last_expected_sequence_id = header.expected_sequence_id;
+        } else {
+            success = outgoing_queue.remove_one_if([&](const outgoing_entry& e) {
+                return e.header.sequence_id == header.sequence_id && e.header.fragment_id == header.fragment_id;
+            });
+        }
 
         if (success) {
             TRELLIS_LOG_ACTION("channel", +header.channel_id, "DATA_ACK corresponded to outgoing packet.");
@@ -236,6 +250,7 @@ private:
     connection_base* conn;
     config::sequence_id_t sequence_id;
     config::sequence_id_t incoming_sequence_id;
+    config::sequence_id_t last_expected_sequence_id;
     std::unordered_map<config::sequence_id_t, fragment_assembler> assemblers;
     retry_queue<outgoing_entry, timer_type> outgoing_queue;
 };

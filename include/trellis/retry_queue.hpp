@@ -41,7 +41,36 @@ public:
 
     /** Removes the first instance of a queue item where the predicate returns true. */
     template <typename G>
-    bool remove_if(const G& pred) {
+    bool remove_all_if(const G& pred) {
+        if (queue.empty()) return false;
+
+        std::sort(queue.begin(), queue.end());
+
+        auto iter = std::remove_if(queue.begin(), queue.end(), [&](const auto& e) { return pred(e.value); });
+
+        auto success = iter != queue.end();
+
+        queue.erase(iter, queue.end());
+
+        assert(std::is_heap(queue.begin(), queue.end(), std::greater{}));
+
+        // If the queue is empty, the timer needs to be cancelled, since it assumes there's a waiting entry.
+
+        if (queue.empty()) {
+            [[maybe_unused]] auto count = timer.cancel();
+            // The pending timer completion handler might have already been queued for execution.
+            // In this case, it cannot be cancelled, so count will be zero.
+            assert(count <= 1);
+        } else {
+            reset_timer();
+        }
+
+        return success;
+    }
+
+    /** Removes the first instance of a queue item where the predicate returns true. */
+    template <typename G>
+    bool remove_one_if(const G& pred) {
         if (queue.empty()) return false;
 
         auto iter = std::find_if(queue.begin(), queue.end(), [&](const auto& e) { return pred(e.value); });
@@ -51,6 +80,7 @@ public:
         // Remove element from the queue, taking care to maintain the heap.
 
         if (iter == queue.end() - 1) {
+            // Fast path in the case that we need to remove the last element.
             queue.pop_back();
         } else {
             auto i = iter - queue.begin();
@@ -65,6 +95,7 @@ public:
             auto i_right = [&]{ return i * 2 + 2; };
 
             if (i_parent() != i && i_parent() < count && queue[i] <= queue[i_parent()]) {
+                // Filter up
                 while (i_parent() != i && queue[i] < queue[i_parent()]) {
                     assert(i >= 0);
                     assert(i < count);
@@ -78,6 +109,7 @@ public:
                     i = i_parent();
                 }
             } else {
+                // Filter down
                 while (true) {
                     assert(i >= 0 && i < count);
                     assert(i_parent() == i || queue[i_parent()] <= queue[i]);
@@ -109,7 +141,9 @@ public:
 
         if (queue.empty()) {
             [[maybe_unused]] auto count = timer.cancel();
-            assert(count == 1);
+            // The pending timer completion handler might have already been queued for execution.
+            // In this case, it cannot be cancelled, so count will be zero.
+            assert(count <= 1);
         } else {
             reset_timer();
         }
@@ -143,14 +177,23 @@ private:
         assert(!queue.empty());
         assert(std::is_heap(queue.begin(), queue.end(), std::greater{}));
 
-        timer.expires_at(queue.front().when);
+        [[maybe_unused]] auto cancelled = timer.expires_at(queue.front().when);
+        assert(cancelled <= 1);
 
         timer.async_wait([this](asio::error_code ec) {
             if (ec == asio::error::operation_aborted) {
                 return;
             }
 
+            // This completion handler might have already been queued before the timer was cancelled.
+            // If that happens, the retry queue will be empty.
+            if (queue.empty()) {
+                return;
+            }
+
+            assert(!ec);
             assert(!queue.empty());
+            assert(std::is_heap(queue.begin(), queue.end(), std::greater{}));
 
             std::pop_heap(queue.begin(), queue.end(), std::greater{});
 
