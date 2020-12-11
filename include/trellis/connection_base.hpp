@@ -29,7 +29,7 @@ enum class connection_state {
 
 class connection_base : public std::enable_shared_from_this<connection_base> {
 public:
-    friend class channel_unreliable_unordered;
+    friend class channel_unreliable;
     friend class channel_reliable;
 
     using protocol = context_base::protocol;

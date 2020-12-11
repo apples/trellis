@@ -36,6 +36,8 @@ target_compile_definitions(trellis INTERFACE ${OS_DEFINITIONS})
 add_executable(trellis_tests
     tests/catch.cpp
     tests/catch.hpp
+    tests/channel_unreliable_unordered.cpp
+    tests/channel_unreliable_sequenced.cpp
     tests/channel_reliable_ordered.cpp
     tests/channel_reliable_unordered.cpp
     tests/channel_reliable_sequenced.cpp)

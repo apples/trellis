@@ -8,6 +8,11 @@ struct channel_type_unreliable_unordered {
 };
 
 template <typename T>
+struct channel_type_unreliable_sequenced {
+    using tag_t = T;
+};
+
+template <typename T>
 struct channel_type_reliable_ordered {
     using tag_t = T;
 };
