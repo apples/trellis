@@ -78,29 +78,29 @@ target_compile_options(proxy_example PRIVATE -Wall -Wextra)
 
 # Asteroids game example
 
-# if(SDL2_FOUND)
-#     add_executable(asteroids_example
-#         examples/asteroids/main.cpp
-#         examples/asteroids/channels.hpp
-#         examples/asteroids/message.hpp
-#         examples/asteroids/overload.hpp
-#         examples/asteroids/client.hpp
-#         examples/asteroids/server.hpp
-#         examples/asteroids/tiny_engine.hpp
-#         examples/asteroids/tiny_engine.cpp
-#         examples/asteroids/tiny_math.hpp
-#         examples/asteroids/glad/src/glad.c
-#         examples/asteroids/glad/include/glad/glad.h
-#         examples/asteroids/glad/include/KHR/khrplatform.h)
-#     set_property(TARGET asteroids_example PROPERTY CXX_STANDARD 17)
-#     target_link_libraries(asteroids_example
-#         trellis
-#         SDL2::SDL2)
-#     target_include_directories(asteroids_example PRIVATE
-#         "${CEREAL_DIR}/include"
-#         "${CMAKE_SOURCE_DIR}/examples/asteroids/glad/include")
-#     target_compile_options(asteroids_example PRIVATE -Wall)
-#     target_compile_definitions(asteroids_example PRIVATE SDL_MAIN_HANDLED)
-# else()
-#     message(WARNING "SDL2 not found, required by target asteroids_example.")
-# endif()
+if(SDL2_FOUND)
+    add_executable(asteroids_example
+        examples/asteroids/main.cpp
+        examples/asteroids/channels.hpp
+        examples/asteroids/message.hpp
+        examples/asteroids/overload.hpp
+        examples/asteroids/client.hpp
+        examples/asteroids/server.hpp
+        examples/asteroids/tiny_engine.hpp
+        examples/asteroids/tiny_engine.cpp
+        examples/asteroids/tiny_math.hpp
+        examples/asteroids/glad/src/glad.c
+        examples/asteroids/glad/include/glad/glad.h
+        examples/asteroids/glad/include/KHR/khrplatform.h)
+    set_property(TARGET asteroids_example PROPERTY CXX_STANDARD 17)
+    target_link_libraries(asteroids_example
+        trellis
+        SDL2::SDL2)
+    target_include_directories(asteroids_example PRIVATE
+        "${CEREAL_DIR}/include"
+        "${CMAKE_SOURCE_DIR}/examples/asteroids/glad/include")
+    target_compile_options(asteroids_example PRIVATE -Wall)
+    target_compile_definitions(asteroids_example PRIVATE SDL_MAIN_HANDLED)
+else()
+    message(WARNING "SDL2 not found, required by target asteroids_example.")
+endif()

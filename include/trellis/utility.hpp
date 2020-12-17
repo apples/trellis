@@ -23,6 +23,11 @@ constexpr auto index_of() -> std::size_t {
     return r;
 }
 
+// comma_t
+
+template <typename A, typename B>
+using comma_t = B;
+
 // tuple_constructor
 
 template <typename T>
@@ -32,7 +37,7 @@ template <typename... Ts>
 struct tuple_constructor<std::tuple<Ts...>> {
     template <typename Arg>
     auto operator()(Arg&& arg) const {
-        return std::forward_as_tuple(std::forward<Arg>(arg));
+        return std::forward_as_tuple(std::forward<comma_t<Ts, Arg>>(arg)...);
     }
 };
 

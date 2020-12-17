@@ -29,11 +29,22 @@ Reliable channels, in the event of packet loss, only resend the fragments that w
 ## TODO
 
 - [x] Unreliable, unordered channels
-- [ ] Reliable, unordered channels
-- [ ] Unreliable, ordered channels
-- [ ] Reliable, ordered channels
-- [ ] Network condition simulation proxy
-- [ ] Unit tests
+- [x] Unreliable, sequenced channels
+- [x] Reliable, unordered channels
+- [x] Reliable, ordered channels
+- [x] Reliable, sequenced channels
+- [x] Network condition simulation proxy
+- [x] Unit tests
+
+## Dependencies
+
+- [Asio](https://think-async.com/Asio/) - Required for core behavior.
+- [Cereal](https://uscilab.github.io/cereal/) - Used for examples.
+- [SDL2](https://www.libsdl.org/) - Used for examples.
+
+## Examples Assets Acknowledgements
+
+- [Fonts](https://nimblebeastscollective.itch.io/magosfonts)
 
 ## Usage
 

@@ -18,8 +18,6 @@ namespace trellis {
  */
 class channel_reliable {
 public:
-    using timer_type = connection_base::timer_type;
-
     channel_reliable(connection_base& conn) :
         conn(&conn),
         sequence_id(0),
@@ -42,7 +40,7 @@ public:
             header,
             datagram,
             size,
-        });
+        }, conn->weak_from_this());
     }
 
     void receive_ack(const headers::data_ack& header) {
@@ -55,13 +53,13 @@ public:
                 return
                     sequence_id_less(e.header.sequence_id, header.expected_sequence_id) ||
                     (e.header.sequence_id == header.sequence_id && e.header.fragment_id == header.fragment_id);
-            });
+            }, conn->weak_from_this());
 
             last_expected_sequence_id = header.expected_sequence_id;
         } else {
             success = outgoing_queue.remove_one_if([&](const outgoing_entry& e) {
                 return e.header.sequence_id == header.sequence_id && e.header.fragment_id == header.fragment_id;
-            });
+            }, conn->weak_from_this());
         }
 
         if (success) {
@@ -141,7 +139,7 @@ protected:
     config::sequence_id_t incoming_sequence_id;
     config::sequence_id_t last_expected_sequence_id;
     std::unordered_map<config::sequence_id_t, fragment_assembler> assemblers;
-    retry_queue<outgoing_entry, timer_type> outgoing_queue;
+    retry_queue<outgoing_entry, connection_base> outgoing_queue;
 };
 
 } // namespace trellis

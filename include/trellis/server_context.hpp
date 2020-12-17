@@ -33,12 +33,15 @@ public:
     using connection_map = std::map<typename protocol::endpoint, std::shared_ptr<connection_type>>;
 
     using connect_function = std::function<void(server_context&, const std::shared_ptr<connection_type>&)>;
+    using disconnect_function = std::function<void(server_context&, const std::shared_ptr<connection_type>&, asio::error_code)>;
 
     using base_type::get_context_id;
 
     server_context(asio::io_context& io) :
         base_type(io),
-        active_connections() {}
+        active_connections(),
+        on_connect_func(),
+        on_disconnect_func() {}
 
     void listen(const typename protocol::endpoint& endpoint) {
         this->open(endpoint);
@@ -66,11 +69,22 @@ public:
         on_connect_func = std::move(func);
     }
 
+    void on_disconnect(disconnect_function func) {
+        on_disconnect_func = std::move(func);
+    }
+
 protected:
     virtual void kill(const connection_base& conn) override {
         auto endpoint = conn.get_endpoint();
         auto iter = active_connections.find(endpoint);
         kill_iter(iter);
+    }
+
+    virtual void connection_error(const connection_base& c, asio::error_code ec) override {
+        auto iter = active_connections.find(c.get_endpoint());
+        if (iter != active_connections.end()) {
+            connection_error(iter->second, ec);
+        }
     }
 
 private:
@@ -227,8 +241,24 @@ private:
         TRELLIS_END_SECTION("server");
     }
 
+    void connection_error(const typename protocol::endpoint& endpoint, asio::error_code ec) {
+        auto iter = active_connections.find(endpoint);
+        if (iter != active_connections.end()) {
+            connection_error(iter->second, ec);
+        }
+    }
+
+    void connection_error(const std::shared_ptr<connection_type>& ptr, asio::error_code ec) {
+        assert(ptr);
+        if (on_disconnect_func) {
+            on_disconnect_func(*this, ptr, ec);
+        }
+        ptr->disconnect_without_send();
+    }
+
     connection_map active_connections;
     connect_function on_connect_func;
+    disconnect_function on_disconnect_func;
 };
 
 } // namespace trellis

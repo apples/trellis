@@ -34,9 +34,9 @@ int main() {
     auto server = server_context(io);
     auto proxy = proxy_context(io);
 
-    auto responses = std::array<bool, 10>{};
+    auto responses = std::array<bool, 100>{};
     auto response_order = std::vector<int>{};
-    response_order.reserve(10);
+    response_order.reserve(100);
 
     auto timer = asio::steady_timer(io, std::chrono::seconds{15});
 

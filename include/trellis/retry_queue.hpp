@@ -1,47 +1,53 @@
 #pragma once
 
+#include "guarded_timer.hpp"
+
 #include <algorithm>
 #include <chrono>
 #include <functional>
+#include <memory>
 #include <vector>
 
 namespace trellis {
 
 /** Implements a time-delayed priority queue. */
-template <typename T, typename C, typename F = std::function<void(const T&)>>
+template <typename Value, typename Guard, typename Timer = guarded_timer<Guard>, typename Handler = std::function<void(const Value&)>>
 class retry_queue {
 public:
-    using value_type = T;
-    using timer_type = C;
+    using value_type = Value;
+    using guard_type = Guard;
+    using timer_type = Timer;
+    using callback_type = Handler;
     using clock = typename timer_type::clock_type;
     using duration = typename clock::duration;
     using time_point = typename clock::time_point;
-    using callback_type = F;
+    using guard_ptr = std::weak_ptr<guard_type>;
 
     retry_queue(asio::io_context& io, callback_type cb) :
         queue(),
         timer(io),
         interval(std::chrono::milliseconds{50}),
-        callback(cb) {}
+        callback(std::move(cb)) {}
 
-    void push(const value_type& value) {
-        push(value_type(value));
+    void push(const value_type& value, const guard_ptr& guard) {
+        push(value_type(value), guard);
     }
 
-    void push(value_type&& value) {
+    void push(value_type&& value, const guard_ptr& guard) {
         queue.push_back({
             clock::now() + interval,
             std::move(value),
         });
 
         std::push_heap(queue.begin(), queue.end(), std::greater{});
+        assert(std::is_heap(queue.begin(), queue.end(), std::greater{}));
 
-        reset_timer();
+        reset_timer(guard);
     }
 
     /** Removes the first instance of a queue item where the predicate returns true. */
     template <typename G>
-    bool remove_all_if(const G& pred) {
+    bool remove_all_if(const G& pred, const guard_ptr& guard) {
         if (queue.empty()) return false;
 
         std::sort(queue.begin(), queue.end());
@@ -62,7 +68,7 @@ public:
             // In this case, it cannot be cancelled, so count will be zero.
             assert(count <= 1);
         } else {
-            reset_timer();
+            reset_timer(guard);
         }
 
         return success;
@@ -70,7 +76,7 @@ public:
 
     /** Removes the first instance of a queue item where the predicate returns true. */
     template <typename G>
-    bool remove_one_if(const G& pred) {
+    bool remove_one_if(const G& pred, const guard_ptr& guard) {
         if (queue.empty()) return false;
 
         auto iter = std::find_if(queue.begin(), queue.end(), [&](const auto& e) { return pred(e.value); });
@@ -145,7 +151,7 @@ public:
             // In this case, it cannot be cancelled, so count will be zero.
             assert(count <= 1);
         } else {
-            reset_timer();
+            reset_timer(guard);
         }
 
         return true;
@@ -173,17 +179,22 @@ private:
         }
     };
 
-    void reset_timer() {
+    struct life_token {};
+
+    void reset_timer(const guard_ptr& guard) {
+        assert(guard.lock());
         assert(!queue.empty());
         assert(std::is_heap(queue.begin(), queue.end(), std::greater{}));
 
         [[maybe_unused]] auto cancelled = timer.expires_at(queue.front().when);
         assert(cancelled <= 1);
 
-        timer.async_wait([this](asio::error_code ec) {
+        timer.async_wait(guard, [this](asio::error_code ec, const guard_ptr& weak_guard) {
             if (ec == asio::error::operation_aborted) {
                 return;
             }
+
+            assert(!ec);
 
             // This completion handler might have already been queued before the timer was cancelled.
             // If that happens, the retry queue will be empty.
@@ -191,21 +202,25 @@ private:
                 return;
             }
 
-            assert(!ec);
-            assert(!queue.empty());
             assert(std::is_heap(queue.begin(), queue.end(), std::greater{}));
 
             std::pop_heap(queue.begin(), queue.end(), std::greater{});
 
             auto& entry = queue.back();
 
+            assert(weak_guard.lock());
+
             callback(entry.value);
 
-            entry.when = clock::now() + interval;
+            if (weak_guard.lock()) {
+                entry.when = clock::now() + interval;
 
-            std::push_heap(queue.begin(), queue.end(), std::greater{});
+                std::push_heap(queue.begin(), queue.end(), std::greater{});
 
-            reset_timer();
+                assert(std::is_heap(queue.begin(), queue.end(), std::greater{}));
+
+                reset_timer(weak_guard);
+            }
         });
     }
 

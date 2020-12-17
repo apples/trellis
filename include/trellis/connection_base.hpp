@@ -1,6 +1,7 @@
 #pragma once
 
 #include "context_base.hpp"
+#include "guarded_timer.hpp"
 #include "logging.hpp"
 #include "message_header.hpp"
 
@@ -33,9 +34,10 @@ public:
     friend class channel_reliable;
 
     using protocol = context_base::protocol;
-    using timer_type = asio::steady_timer;
+    using timer_type = guarded_timer<connection_base>;
 
     using std::enable_shared_from_this<connection_base>::shared_from_this;
+    using std::enable_shared_from_this<connection_base>::weak_from_this;
 
     connection_base(context_base& context, const protocol::endpoint& client_endpoint) :
         context(&context),
@@ -90,7 +92,11 @@ public:
             buffer.buffer(sizeof(type)),
             client_endpoint,
             [buffer, func, self = this->shared_from_this()]([[maybe_unused]] asio::error_code ec, [[maybe_unused]] std::size_t size) {
-                TRELLIS_LOG_ACTION("conn", self->connection_id, "Sent DISCONNECT successfully, killing connection.");
+                if (!ec) {
+                    TRELLIS_LOG_ACTION("conn", self->connection_id, "Sent DISCONNECT successfully, killing connection.");
+                } else {
+                    TRELLIS_LOG_ACTION("conn", self->connection_id, "Something went wrong when sending DISCONNECT: ", ec.category().name(), ": ", ec.message(), "Killing connection.");
+                }
                 self->context->kill(*self);
                 func();
             });
@@ -109,8 +115,8 @@ protected:
 
         context->get_socket().async_send_to(data.buffer(count), client_endpoint, [data, ptr = shared_from_this()](asio::error_code ec, [[maybe_unused]] std::size_t size) {
             if (ec) {
-                std::cerr << "Error: " << ec.category().name() << ": " << ec.message() << std::endl;
-                ptr->disconnect();
+                TRELLIS_LOG_ACTION("conn", ptr->connection_id, "ERROR send_raw: ", ec.category().name(), ": ", ec.message());
+                ptr->context->connection_error(*ptr, ec);
             }
         });
     }
@@ -136,7 +142,7 @@ protected:
             send_raw(buffer, sizeof(type));
 
             handshake = handshake_state{
-                asio::steady_timer(context->get_io()),
+                timer_type(context->get_io()),
                 buffer,
             };
         }
@@ -147,7 +153,7 @@ protected:
         // 200ms for now, should probably be dynamic in the future.
         handshake->timer.expires_from_now(std::chrono::milliseconds{200});
 
-        handshake->timer.async_wait([this](asio::error_code ec) {
+        handshake->timer.async_wait(weak_from_this(), [this](asio::error_code ec) {
             if (ec == asio::error::operation_aborted) {
                 return;
             }
@@ -229,7 +235,7 @@ protected:
             send_raw(buffer, size);
 
             handshake = handshake_state{
-                asio::steady_timer(context->get_io()),
+                timer_type(context->get_io()),
                 buffer,
             };
         }
@@ -245,7 +251,7 @@ protected:
             handshake->timer.expires_from_now(std::chrono::milliseconds{0});
         }
 
-        handshake->timer.async_wait([this](asio::error_code ec) {
+        handshake->timer.async_wait(weak_from_this(), [this](asio::error_code ec) {
             if (ec == asio::error::operation_aborted) {
                 return;
             }
@@ -302,6 +308,10 @@ protected:
         }
 
         TRELLIS_LOG_ACTION("conn", connection_id, "Disconnecting without sending DISCONNECT. Killing immediately.");
+
+        if (state == connection_state::CONNECTING || state == connection_state::PENDING) {
+            cancel_handshake();
+        }
 
         state = connection_state::DISCONNECTED;
 

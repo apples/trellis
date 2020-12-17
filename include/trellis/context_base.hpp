@@ -56,6 +56,8 @@ protected:
     /** Kills and removes the given connection without sending a DISCONNECT. */
     virtual void kill(const connection_base& conn) = 0;
 
+    virtual void connection_error(const connection_base& conn, asio::error_code ec) = 0;
+
 private:
     asio::io_context* io;
     protocol::socket socket;

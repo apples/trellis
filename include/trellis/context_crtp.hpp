@@ -51,6 +51,7 @@ public:
 protected:
     void open(const protocol::endpoint& endpoint) {
         get_socket().open(endpoint.protocol());
+        get_socket().set_option(asio::ip::v6_only{false});
         get_socket().bind(endpoint);
         running = true;
         receive();
@@ -78,6 +79,7 @@ protected:
 
 private:
     void receive() {
+        sender_endpoint = {};
         get_socket().async_receive_from(asio::buffer(buffer.data), sender_endpoint, [this](asio::error_code ec, std::size_t size) {
             if (!ec) {
                 if (running) {
@@ -88,9 +90,22 @@ private:
                         receive();
                     }
                 }
-            } else if (ec.value() != asio::error::operation_aborted) {
-                std::cerr << "[trellis] ERROR " << ec.category().name() << ": " << ec.message() << std::endl;
-                stop();
+            } else {
+                switch (ec.value()) {
+                    case asio::error::operation_aborted:
+                        return;
+                    default: {
+                        TRELLIS_LOG_ACTION("receive", sender_endpoint, ec.category().name(), "(", ec.value(), "): ", ec.message());
+                        if (sender_endpoint != protocol::endpoint{}) {
+                            auto derived = static_cast<derived_type*>(this);
+                            derived->connection_error(sender_endpoint, ec);
+                        }
+                        if (running) {
+                            receive();
+                        }
+                        return;
+                    }
+                }
             }
         });
     }

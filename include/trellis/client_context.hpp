@@ -29,13 +29,14 @@ public:
     using typename base_type::traits;
 
     using connect_function = std::function<void(client_context&, const std::shared_ptr<connection_type>&)>;
-    using receive_function = std::function<void(client_context&, const std::shared_ptr<connection_type>&, std::istream&)>;
+    using disconnect_function = std::function<void(client_context&, const std::shared_ptr<connection_type>&, asio::error_code)>;
 
     using base_type::get_context_id;
 
     client_context(asio::io_context& io) :
         base_type(io),
         on_connect_func(),
+        on_disconnect_func(),
         conn(nullptr) {}
 
     void connect(const typename protocol::endpoint& client_endpoint, const typename protocol::endpoint& server_endpoint) {
@@ -65,6 +66,10 @@ public:
         on_connect_func = std::move(func);
     }
 
+    void on_disconnect(disconnect_function func) {
+        on_disconnect_func = std::move(func);
+    }
+
 protected:
     virtual void kill(const connection_base& c) override {
         assert(&c == conn.get());
@@ -72,6 +77,12 @@ protected:
 
         conn = nullptr;
         this->stop();
+    }
+
+    virtual void connection_error(const connection_base& c, asio::error_code ec) override {
+        if (conn && &c == conn.get()) {
+            connection_error(conn, ec);
+        }
     }
 
 private:
@@ -185,7 +196,22 @@ private:
         TRELLIS_END_SECTION("client");
     }
 
+    void connection_error(const typename protocol::endpoint& endpoint, asio::error_code ec) {
+        if (conn && endpoint == conn->get_endpoint()) {
+            connection_error(conn, ec);
+        }
+    }
+
+    void connection_error(const std::shared_ptr<connection_type>& ptr, asio::error_code ec) {
+        assert(ptr);
+        if (on_disconnect_func) {
+            on_disconnect_func(*this, ptr, ec);
+        }
+        ptr->disconnect_without_send();
+    }
+
     connect_function on_connect_func;
+    disconnect_function on_disconnect_func;
     std::shared_ptr<connection_type> conn;
 };
 
