@@ -73,6 +73,10 @@ public:
         }
     }
 
+    auto get_stats() const -> std::array<connection_stats, traits::channel_count> {
+        return get_stats(std::make_index_sequence<traits::channel_count>{});
+    }
+
 private:
     // Exposed as provate members so Context can access them.
     using connection_base::send_raw;
@@ -127,6 +131,11 @@ private:
         assert(get_state() == connection_state::ESTABLISHED);
 
         ((Is == header.channel_id ? (std::get<Is>(channels).receive_ack(header), true) : false) || ...);
+    }
+
+    template <std::size_t... Is>
+    auto get_stats(std::index_sequence<Is...>) const -> std::array<connection_stats, traits::channel_count> {
+        return {std::get<Is>(channels).get_stats()...};
     }
 
     /** Channel states. */

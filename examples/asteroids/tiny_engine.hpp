@@ -9,8 +9,10 @@
 
 #include <asio.hpp>
 
+#include <atomic>
 #include <cassert>
 #include <cstdint>
+#include <chrono>
 #include <memory>
 #include <string>
 
@@ -393,11 +395,15 @@ private:
 /// Main engine
 class tiny_engine {
 public:
+    using clock = std::chrono::steady_clock;
+
     tiny_engine(asio::io_context& io, const std::string& name) :
         io(&io),
         window{},
         gl_context{},
-        running{false} {
+        running{false},
+        io_mutex{},
+        io_cv{} {
             // Require OpenGL 4.3 Core profile
             SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
             SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 4);
@@ -461,36 +467,79 @@ public:
 
     void main_loop() {
         running = true;
-        while (running) {
-            io->poll();
 
-            for (auto event = SDL_Event{}; SDL_PollEvent(&event);) {
-                switch (event.type) {
-                    case SDL_QUIT:
-                        running = false;
-                        return; // breaks out early!
-                    default:
-                        if (scene) {
-                            scene->handle_event(*this, event);
-                        }
-                        break;
-                }
+        // IO thread for networking
+        auto io_thread = std::thread([this]{
+            while (running) {
+                auto lock = std::unique_lock(io_mutex);
+                io->run();
+                io_cv.wait(lock, [&]{ return !running || !io->stopped(); });
             }
+        });
 
-            if (scene) {
-                scene->update(*this);
+        // Rendering "thread"
+        [&]{
+            while (running) {
+                // Window event polling
+                for (auto event = SDL_Event{}; running && SDL_PollEvent(&event);) {
+                    // Stop the IO thread
+                    io->stop();
 
-                glClearColor(0, 0, 0, 1);
-                glClear(GL_COLOR_BUFFER_BIT);
-                scene->draw(*this);
+                    auto lock = std::lock_guard(io_mutex);
+
+                    switch (event.type) {
+                        case SDL_QUIT:
+                            running = false;
+                            return; // breaks out of lambda
+                        default:
+                            if (scene) {
+                                scene->handle_event(*this, event);
+                            }
+                            break;
+                    }
+
+                    // Restart IO thread
+                    io->restart();
+                    io_cv.notify_one();
+                }
+
+                {
+                    // Stop the IO thread
+                    io->stop();
+
+                    auto lock = std::lock_guard(io_mutex);
+
+                    // Scene update and render
+                    if (scene) {
+                        scene->update(*this);
+
+                        glClearColor(0, 0, 0, 1);
+                        glClear(GL_COLOR_BUFFER_BIT);
+                        scene->draw(*this);
+                    }
+
+                    // Queued scene transition
+                    if (queued_scene) {
+                        queued_scene(*this);
+                        queued_scene = {};
+                    }
+
+                    // Restart IO thread
+                    io->restart();
+                    io_cv.notify_one();
+                }
+
+                // Swap buffers (vsync)
                 SDL_GL_SwapWindow(window);
             }
+        }();
 
-            if (queued_scene) {
-                queued_scene(*this);
-                queued_scene = {};
-            }
-        }
+        // Stop IO thread
+        io->stop();
+        io_cv.notify_one();
+        io_thread.join();
+
+        // Destroy scene
         scene.reset();
     }
 
@@ -504,5 +553,7 @@ private:
     SDL_GLContext gl_context;
     std::unique_ptr<tiny_scene_base> scene;
     std::function<void(tiny_engine& e)> queued_scene;
-    bool running;
+    std::atomic<bool> running;
+    std::mutex io_mutex;
+    std::condition_variable io_cv;
 };

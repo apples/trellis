@@ -6,6 +6,7 @@
 #include "message_header.hpp"
 #include "logging.hpp"
 #include "streams.hpp"
+#include "connection_stats.hpp"
 
 namespace trellis {
 
@@ -31,6 +32,13 @@ public:
     void receive_ack(const headers::data_ack& header) {
         TRELLIS_LOG_ACTION("channel", +header.channel_id, "Received unexpected DATA_ACK (sid:", header.sequence_id, ",fid:", header.fragment_id, "). Disconnecting.");
         conn->disconnect();
+    }
+
+    auto get_stats() const -> connection_stats {
+        return {
+            0,
+            int(assemblers.size()),
+        };
     }
 
 protected:

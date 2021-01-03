@@ -157,6 +157,10 @@ public:
         return true;
     }
 
+    auto size() const -> std::size_t {
+        return queue.size();
+    }
+
 private:
     struct retry_entry {
         time_point when;

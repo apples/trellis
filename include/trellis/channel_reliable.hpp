@@ -7,6 +7,7 @@
 #include "logging.hpp"
 #include "retry_queue.hpp"
 #include "streams.hpp"
+#include "connection_stats.hpp"
 
 #include <unordered_map>
 
@@ -44,7 +45,7 @@ public:
     }
 
     void receive_ack(const headers::data_ack& header) {
-        TRELLIS_LOG_ACTION("channel", +header.channel_id, "Received DATA_ACK (sid:", header.sequence_id, ",fid:", +header.fragment_id, ").");
+        TRELLIS_LOG_ACTION("channel", +header.channel_id, "Received DATA_ACK (sid:", header.sequence_id, ",fid:", +header.fragment_id, "eid:", header.expected_sequence_id, ").");
 
         [[maybe_unused]] auto success = false;
 
@@ -67,6 +68,13 @@ public:
         } else {
             TRELLIS_LOG_ACTION("channel", +header.channel_id, "DATA_ACK did not correspond to any outgoing packet.");
         }
+    }
+
+    auto get_stats() const -> connection_stats {
+        return {
+            int(outgoing_queue.size()),
+            int(assemblers.size()),
+        };
     }
 
 protected:
