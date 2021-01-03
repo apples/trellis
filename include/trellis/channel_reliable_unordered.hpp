@@ -12,9 +12,15 @@ class channel_reliable_unordered : public channel_reliable {
 public:
     channel_reliable_unordered(connection_base& conn) : channel_reliable(conn) {}
 
+    void send_packet(const headers::data& header, const shared_datagram_buffer& datagram, std::size_t size) {
+        send_packet_impl(header, datagram, size);
+    }
+
     template <typename F>
     void receive(const headers::data& header, const datagram_buffer& datagram, size_t count, const F& on_receive_func) {
-        receive_impl(header, datagram, count, [&](auto iter) {
+        if (auto result = receive_impl(header, datagram, count)) {
+            auto iter = *result;
+
             auto& assembler = iter->second;
 
             assert(!assembler.is_cancelled());
@@ -42,7 +48,7 @@ public:
                     iter = assemblers.find(incoming_sequence_id);
                 }
             }
-        });
+        }
     }
 };
 

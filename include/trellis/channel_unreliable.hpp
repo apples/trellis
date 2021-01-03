@@ -8,6 +8,8 @@
 #include "streams.hpp"
 #include "connection_stats.hpp"
 
+#include <string_view>
+
 namespace trellis {
 
 /** Channel implementing an unreliable protocol. */
@@ -42,14 +44,9 @@ public:
     }
 
 protected:
-    template <typename F, typename G>
-    void receive_impl(const headers::data& header, const datagram_buffer& datagram, size_t count, const F& should_discard, const G& on_receive_func) {
+    auto receive_impl(const headers::data& header, const datagram_buffer& datagram, size_t count) -> std::optional<std::string_view> {
         assert(count <= config::datagram_size);
         assert(count >= headers::data_offset);
-
-        if (should_discard()) {
-            return;
-        }
 
         if (header.fragment_count == 1) {
             // Shortcut for non-fragmented packets
@@ -57,11 +54,13 @@ protected:
             TRELLIS_LOG_ACTION("channel", +header.channel_id, "Processing message ", header.sequence_id, " as non-fragmented.");
 
             assert(header.fragment_id == 0);
+
             auto b = datagram.data.data() + headers::data_offset;
             auto e = datagram.data.data() + count;
+
             assert(count <= config::datagram_size);
-            auto istream = ibytestream(b, e);
-            on_receive_func(istream);
+
+            return std::string_view{b, static_cast<std::size_t>(e - b)};
         } else {
             TRELLIS_LOG_ACTION("channel", +header.channel_id, "Processing message ", header.sequence_id, " as fragment piece ", +header.fragment_id, " / ", +header.fragment_count, ".");
 
@@ -89,11 +88,14 @@ protected:
                 assembler.receive(header, b, e);
 
                 if (assembler.is_complete()) {
-                    TRELLIS_LOG_ACTION("channel", +header.channel_id, "Message reassembly is complete, calling on_receive_func.");
+                    TRELLIS_LOG_ACTION("channel", +header.channel_id, "Message reassembly is complete.");
 
-                    auto istream = ibytestream(assembler.data(), assembler.data() + assembler.size());
-                    on_receive_func(istream);
+                    return std::string_view{assembler.data(), assembler.size()};
+                } else {
+                    return std::nullopt;
                 }
+            } else {
+                return std::nullopt;
             }
         }
     }

@@ -13,17 +13,16 @@ public:
 
     template <typename F>
     void receive(const headers::data& header, const datagram_buffer& datagram, size_t count, const F& on_receive_func) {
-        receive_impl(header, datagram, count,
-            [&]() {
-                return sequence_id_less(header.sequence_id, incoming_sequence_id);
-            },
-            [&](auto& istream) {
+        if (!sequence_id_less(header.sequence_id, incoming_sequence_id)) {
+            if (auto data = receive_impl(header, datagram, count)) {
+                auto istream = ibytestream(data->begin(), data->end());
                 on_receive_func(istream);
 
                 assert(!sequence_id_less(header.sequence_id, incoming_sequence_id));
 
                 incoming_sequence_id = header.sequence_id + 1;
-            });
+            }
+        }
     }
 
 private:

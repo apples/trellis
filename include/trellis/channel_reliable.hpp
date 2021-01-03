@@ -19,6 +19,8 @@ namespace trellis {
  */
 class channel_reliable {
 public:
+    using assembler_map = std::unordered_map<config::sequence_id_t, fragment_assembler>;
+
     channel_reliable(connection_base& conn) :
         conn(&conn),
         sequence_id(0),
@@ -32,16 +34,6 @@ public:
 
     auto next_sequence_id() -> config::sequence_id_t {
         return sequence_id++;
-    }
-
-    void send_packet(const headers::data& header, const shared_datagram_buffer& datagram, std::size_t size) {
-        conn->send_raw(datagram, size);
-
-        outgoing_queue.push({
-            header,
-            datagram,
-            size,
-        }, conn->weak_from_this());
     }
 
     void receive_ack(const headers::data_ack& header) {
@@ -84,13 +76,22 @@ protected:
         std::size_t size;
     };
 
+    void send_packet_impl(const headers::data& header, const shared_datagram_buffer& datagram, std::size_t size) {
+        conn->send_raw(datagram, size);
+
+        outgoing_queue.push({
+            header,
+            datagram,
+            size,
+        }, conn->weak_from_this());
+    }
+
     void send_outgoing(const outgoing_entry& entry) {
         TRELLIS_LOG_ACTION("channel", +entry.header.channel_id, "Resending outgoing packet (", entry.header.sequence_id, ").");
         conn->send_raw(entry.datagram, entry.size);
     }
 
-    template <typename F>
-    void receive_impl(const headers::data& header, const datagram_buffer& datagram, size_t count, const F& on_complete_func) {
+    auto receive_impl(const headers::data& header, const datagram_buffer& datagram, size_t count) -> std::optional<assembler_map::iterator> {
         assert(count >= headers::data_offset);
         assert(count <= config::datagram_size);
         assert(header.fragment_id < header.fragment_count);
@@ -100,7 +101,7 @@ protected:
         if (sequence_id_less(header.sequence_id, incoming_sequence_id)) {
             TRELLIS_LOG_ACTION("channel", +header.channel_id, "Message ", header.sequence_id, ", fragment piece ", +header.fragment_id, " received duplicate. Expected: ", incoming_sequence_id, ".");
             conn->send_ack(header.channel_id, header.sequence_id, incoming_sequence_id, header.fragment_id);
-            return;
+            return std::nullopt;
         }
 
         auto iter = assemblers.find(header.sequence_id);
@@ -120,6 +121,8 @@ protected:
 
         assert(assembler.get_sequence_id() == header.sequence_id);
 
+        auto result = std::optional<assembler_map::iterator>{};
+
         if (assembler.has_fragment(header.fragment_id)) {
             TRELLIS_LOG_ACTION("channel", +header.channel_id, "Assembler for sequence_id ", header.sequence_id, " already has fragment ", +header.fragment_id, ". Ignoring.");
 
@@ -135,18 +138,20 @@ protected:
             if (assembler.is_complete()) {
                 TRELLIS_LOG_ACTION("channel", +header.channel_id, "Message reassembly is complete, calling on_complete_func.");
 
-                on_complete_func(iter);
+                result = iter;
             }
         }
 
         conn->send_ack(header.channel_id, header.sequence_id, incoming_sequence_id, header.fragment_id);
+
+        return result;
     }
 
     connection_base* conn;
     config::sequence_id_t sequence_id;
     config::sequence_id_t incoming_sequence_id;
     config::sequence_id_t last_expected_sequence_id;
-    std::unordered_map<config::sequence_id_t, fragment_assembler> assemblers;
+    assembler_map assemblers;
     retry_queue<outgoing_entry, connection_base> outgoing_queue;
 };
 
