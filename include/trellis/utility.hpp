@@ -23,6 +23,21 @@ constexpr auto index_of() -> std::size_t {
     return r;
 }
 
+// nth_type
+
+template <int N, typename H, typename... Ts>
+struct nth_type {
+    using type = typename nth_type<N - 1, Ts...>::type;
+};
+
+template <typename H, typename... Ts>
+struct nth_type<0, H, Ts...> {
+    using type = H;
+};
+
+template <int N, typename... Ts>
+using nth_type_t = typename nth_type<N, Ts...>::type;
+
 // comma_t
 
 template <typename A, typename B>
@@ -40,5 +55,15 @@ struct tuple_constructor<std::tuple<Ts...>> {
         return std::forward_as_tuple(std::forward<comma_t<Ts, Arg>>(arg)...);
     }
 };
+
+// overload
+
+template <typename... Ts>
+struct overload : Ts... {
+    using Ts::operator()...;
+};
+
+template <typename... Ts>
+overload(Ts...) -> overload<Ts...>;
 
 } // namespace trellis

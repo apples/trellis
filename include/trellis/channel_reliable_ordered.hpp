@@ -18,6 +18,9 @@ public:
 
     template <typename F>
     void receive(const headers::data& header, const datagram_buffer& datagram, size_t count, const F& on_receive_func) {
+        // should only be called from the connections's receive handler, so we should be in the networking thread
+        assert(conn->get_context().is_thread_current());
+
         if (auto result = receive_impl(header, datagram, count)) {
             auto iter = *result;
 
@@ -29,10 +32,11 @@ public:
 
                     assert(assembler.get_sequence_id() == incoming_sequence_id);
 
-                    auto istream = ibytestream(assembler.data(), assembler.data() + assembler.size());
+                    auto istream = ibytestream(assembler.data(), assembler.size());
 
                     TRELLIS_LOG_ACTION("channel", +header.channel_id, "Calling on_receive_func for sequence_id ", incoming_sequence_id, ".");
-                    on_receive_func(istream);
+
+                    on_receive_func(raw_buffer{assembler.release(), assembler.size()});
 
                     assemblers.erase(iter);
 

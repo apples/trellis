@@ -78,7 +78,7 @@ private:
         protocol::endpoint client_endpoint;
         protocol::endpoint sender_endpoint;
         protocol::socket socket;
-        datagram_buffer buffer;
+        datagram_storage buffer;
     };
 
     // Client => Server
@@ -156,7 +156,7 @@ private:
 
     // Server => Client
     void receive(proxy_connection& conn) {
-        conn.socket.async_receive_from(asio::buffer(conn.buffer.data), conn.sender_endpoint, [this, &conn](asio::error_code ec, std::size_t size) {
+        conn.socket.async_receive_from(asio::buffer(conn.buffer), conn.sender_endpoint, [this, &conn](asio::error_code ec, std::size_t size) {
             if (ec.value() == asio::error::operation_aborted || !running) {
                 return;
             } else if (ec) {
@@ -167,7 +167,7 @@ private:
 
             ++stats.server_messages;
 
-            TRELLIS_LOG_DATAGRAM("prox", conn.buffer.data, size);
+            TRELLIS_LOG_DATAGRAM("prox", conn.buffer, size);
 
             assert(conn.sender_endpoint == remote_endpoint);
 
@@ -181,7 +181,7 @@ private:
 
                 auto buffer = cache.make_pending_buffer();
 
-                std::memcpy(buffer.data(), conn.buffer.data.data(), size);
+                std::memcpy(buffer.data(), conn.buffer.data(), size);
 
                 proxy_socket.async_send_to(buffer.buffer(size), conn.client_endpoint, [this, &conn, buffer, sz = size](asio::error_code ec, std::size_t size) {
                     if (ec && ec.value() != asio::error::operation_aborted) {

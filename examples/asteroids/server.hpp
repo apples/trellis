@@ -39,18 +39,6 @@ public:
         log_timer(io),
         players(),
         next_player_id(0) {
-            server.on_connect([this](server_context&, const connection_ptr& conn) {
-                this->on_connect(conn);
-            });
-            server.on_disconnect([this](server_context&, const connection_ptr& conn, asio::error_code ec) {
-                this->on_disconnect(conn, ec);
-            });
-            server.on_receive<channel::sync>([this](server_context&, const connection_ptr& conn, std::istream& istream) {
-                this->on_receive_sync(conn, istream);
-            });
-            server.on_receive<channel::state_updates>([this](server_context&, const connection_ptr& conn, std::istream& istream) {
-                this->on_receive_state_updates(conn, istream);
-            });
             server.listen({asio::ip::udp::v6(), static_cast<unsigned short>(port)});
             std::cout << "Server listening." << std::endl;
         }
@@ -65,12 +53,98 @@ public:
     void stop() {
         std::cout << "Server stopped." << std::endl;
         timer.cancel();
+        log_timer.cancel();
         server.stop();
+    }
+
+    void on_connect(const connection_ptr& conn) {
+        auto iter = players.find(conn->get_endpoint());
+        if (iter != players.end()) {
+            std::cout << "Player " << iter->second.id << " attempted to connect twice." << std::endl;
+            conn->disconnect();
+        } else {
+            auto new_player = player_data{
+                next_player_id++,
+                {0, 0},
+                {},
+                conn,
+            };
+
+            std::cout << "New player: " << new_player.id << std::endl;
+
+            players.emplace(conn->get_endpoint(), new_player);
+
+            auto msg = message::player_init{
+                new_player.id,
+                new_player.pos,
+            };
+
+            send_message<channel::sync>(msg, *conn);
+        }
+    }
+
+    void on_disconnect(const connection_ptr& conn, asio::error_code ec) {
+        auto iter = players.find(conn->get_endpoint());
+        if (iter != players.end()) {
+            std::cout << "Player " << iter->second.id << " disconnected: ";
+        } else {
+            std::cout << "Ghost disconnected: ";
+        }
+        if (ec) {
+            std::cout << "Error: " << ec.message() << std::endl;
+        } else {
+            std::cout << "Disconnected." << std::endl;
+        }
+    }
+
+    void on_receive(channel::sync, const connection_ptr& conn, std::istream& istream) {
+        message::any msg;
+        {
+            auto archive = cereal::BinaryInputArchive(istream);
+            archive(msg);
+        }
+
+        std::visit(overload {
+            [&](const auto&) {
+                conn->disconnect();
+            },
+        }, msg);
+    }
+
+    void on_receive(channel::state_updates, const connection_ptr& conn, std::istream& istream) {
+        message::any msg;
+        {
+            auto archive = cereal::BinaryInputArchive(istream);
+            archive(msg);
+        }
+
+        auto iter = players.find(conn->get_endpoint());
+        if (iter == players.end()) {
+            conn->disconnect();
+        } else {
+            std::visit(overload {
+                [&](const auto&) {
+                    conn->disconnect();
+                },
+                [&](const message::player_input& m) {
+                    std::copy_n(m.inputs, sizeof(m.inputs), iter->second.inputs);
+                    std::cout << "Input update (" << iter->second.id << "): [" <<
+                        (iter->second.inputs[0] ? "O" : "-") <<
+                        (iter->second.inputs[1] ? "O" : "-") <<
+                        (iter->second.inputs[2] ? "O" : "-") <<
+                        (iter->second.inputs[3] ? "O" : "-") <<
+                        "]" << std::endl;
+                },
+            }, msg);
+        }
     }
 
 private:
     void tick() {
         auto start = clock::now();
+
+        // Networking
+        server.poll_events(*this);
 
         // Physics
         {
@@ -90,7 +164,7 @@ private:
             }
         }
 
-        // Networking
+        // Player update messages
         {
             auto msg = message::player_updates{};
 
@@ -150,88 +224,6 @@ private:
             if (ec) return;
             log_stats();
         });
-    }
-
-    void on_connect(const connection_ptr& conn) {
-        auto iter = players.find(conn->get_endpoint());
-        if (iter != players.end()) {
-            std::cout << "Player " << iter->second.id << " attempted to connect twice." << std::endl;
-            conn->disconnect();
-        } else {
-            auto new_player = player_data{
-                next_player_id++,
-                {0, 0},
-                {},
-                conn,
-            };
-
-            std::cout << "New player: " << new_player.id << std::endl;
-
-            players.emplace(conn->get_endpoint(), new_player);
-
-            auto msg = message::player_init{
-                new_player.id,
-                new_player.pos,
-            };
-
-            send_message<channel::sync>(msg, *conn);
-        }
-    }
-
-    void on_disconnect(const connection_ptr& conn, asio::error_code ec) {
-        auto iter = players.find(conn->get_endpoint());
-        if (iter != players.end()) {
-            std::cout << "Player " << iter->second.id << " disconnected: ";
-        } else {
-            std::cout << "Ghost disconnected: ";
-        }
-        if (ec) {
-            std::cout << "Error: " << ec.message() << std::endl;
-        } else {
-            std::cout << "Disconnected." << std::endl;
-        }
-    }
-
-    void on_receive_sync(const connection_ptr& conn, std::istream& istream) {
-        message::any msg;
-        {
-            auto archive = cereal::BinaryInputArchive(istream);
-            archive(msg);
-        }
-
-        std::visit(overload {
-            [&](const auto&) {
-                conn->disconnect();
-            },
-        }, msg);
-    }
-
-    void on_receive_state_updates(const connection_ptr& conn, std::istream& istream) {
-        message::any msg;
-        {
-            auto archive = cereal::BinaryInputArchive(istream);
-            archive(msg);
-        }
-
-        auto iter = players.find(conn->get_endpoint());
-        if (iter == players.end()) {
-            conn->disconnect();
-        } else {
-            std::visit(overload {
-                [&](const auto&) {
-                    conn->disconnect();
-                },
-                [&](const message::player_input& m) {
-                    std::copy_n(m.inputs, sizeof(m.inputs), iter->second.inputs);
-                    std::cout << "Input update (" << iter->second.id << "): [" <<
-                        (iter->second.inputs[0] ? "O" : "-") <<
-                        (iter->second.inputs[1] ? "O" : "-") <<
-                        (iter->second.inputs[2] ? "O" : "-") <<
-                        (iter->second.inputs[3] ? "O" : "-") <<
-                        "]" << std::endl;
-                },
-            }, msg);
-        }
     }
 
     asio::io_service* io;

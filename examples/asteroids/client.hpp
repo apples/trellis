@@ -33,20 +33,6 @@ public:
             auto addr = asio::ip::make_address(server_ip);
             client->connect({addr.is_v4() ? asio::ip::udp::v4() : asio::ip::udp::v6(), 0}, {addr, static_cast<unsigned short>(server_port)});
 
-            client->on_connect([this](client_context&, const connection_ptr& conn) {
-                on_connect(conn);
-            });
-            client->on_disconnect([this](client_context&, const connection_ptr& conn, asio::error_code ec) {
-                on_disconnect(ec);
-            });
-
-            client->on_receive<channel::sync>([this](client_context&, const connection_ptr& conn, std::istream& istream) {
-                on_receive(conn, istream);
-            });
-            client->on_receive<channel::state_updates>([this](client_context&, const connection_ptr& conn, std::istream& istream) {
-                on_receive(conn, istream);
-            });
-
             renderer.set_camera_size({800,600});
             renderer.set_camera_pos({0,0});
         }
@@ -103,6 +89,8 @@ public:
     }
 
     virtual void update(tiny_engine& engine) override {
+        client->poll_events(*this);
+
         if (inputs_changed) {
             if (auto conn = wconn.lock(); conn && my_player) {
                 auto msg = message::player_input{};
@@ -135,13 +123,12 @@ public:
         engine->stop();
     }
 
-private:
     void on_connect(const connection_ptr& conn) {
         std::cout << "Connected!" << std::endl;
         wconn = conn;
     }
 
-    void on_disconnect(asio::error_code ec) {
+    void on_disconnect(const connection_ptr& conn, asio::error_code ec) {
         if (ec) {
             std::cout << "Connection error: " << ec.message() << std::endl;
         } else {
@@ -150,6 +137,15 @@ private:
         stop();
     }
 
+    void on_receive(channel::sync, const connection_ptr& conn, std::istream& istream) {
+        on_receive(conn, istream);
+    }
+
+    void on_receive(channel::state_updates, const connection_ptr& conn, std::istream& istream) {
+        on_receive(conn, istream);
+    }
+
+private:
     void on_receive(const connection_ptr& conn, std::istream& istream) {
         message::any msg;
         {

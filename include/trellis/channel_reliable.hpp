@@ -37,6 +37,9 @@ public:
     }
 
     void receive_ack(const headers::data_ack& header) {
+        // should only be called from the connections's receive handler, so we should be in the networking thread
+        assert(conn->get_context().is_thread_current());
+
         TRELLIS_LOG_ACTION("channel", +header.channel_id, "Received DATA_ACK (sid:", header.sequence_id, ",fid:", +header.fragment_id, "eid:", header.expected_sequence_id, ").");
 
         [[maybe_unused]] auto success = false;
@@ -77,21 +80,29 @@ protected:
     };
 
     void send_packet_impl(const headers::data& header, const shared_datagram_buffer& datagram, std::size_t size) {
-        conn->send_raw(datagram, size);
+        conn->get_context().dispatch([this, header, datagram, size, conn_ptr = conn->shared_from_this()]{
+            conn->send_raw(datagram, size);
 
-        outgoing_queue.push({
-            header,
-            datagram,
-            size,
-        }, conn->weak_from_this());
+            outgoing_queue.push({
+                header,
+                datagram,
+                size,
+            }, conn_ptr);
+        });
     }
 
     void send_outgoing(const outgoing_entry& entry) {
+        // should only be called from the outgoing_queue's timer, so we should be in the networking thread
+        assert(conn->get_context().is_thread_current());
+
         TRELLIS_LOG_ACTION("channel", +entry.header.channel_id, "Resending outgoing packet (", entry.header.sequence_id, ").");
         conn->send_raw(entry.datagram, entry.size);
     }
 
     auto receive_impl(const headers::data& header, const datagram_buffer& datagram, size_t count) -> std::optional<assembler_map::iterator> {
+        // should only be called from the connections's receive handler, so we should be in the networking thread
+        assert(conn->get_context().is_thread_current());
+
         assert(count >= headers::data_offset);
         assert(count <= config::datagram_size);
         assert(header.fragment_id < header.fragment_count);
@@ -148,7 +159,7 @@ protected:
     }
 
     connection_base* conn;
-    config::sequence_id_t sequence_id;
+    std::atomic<config::sequence_id_t> sequence_id;
     config::sequence_id_t incoming_sequence_id;
     config::sequence_id_t last_expected_sequence_id;
     assembler_map assemblers;

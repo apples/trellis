@@ -44,10 +44,12 @@ public:
     auto async_wait(const std::weak_ptr<guard_value>& guard, WaitHandler&& handler) {
         assert(guard.lock());
 
-        return timer.async_wait([guard, handler = std::forward<WaitHandler>(handler)](asio::error_code ec) {
+        auto exec = asio::get_associated_executor(handler);
+
+        return timer.async_wait(asio::bind_executor(exec, [guard, handler = std::forward<WaitHandler>(handler)](asio::error_code ec) {
             if (!guard.lock()) return;
             guarded_timer_invoke(handler, ec, guard);
-        });
+        }));
     }
 
 private:

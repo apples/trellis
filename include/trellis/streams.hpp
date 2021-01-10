@@ -18,7 +18,7 @@ public:
 
 class ibytestream final : public std::istream {
 public:
-    ibytestream(const char* b, const char* e) : std::istream(&buf), buf(const_cast<char*>(b), const_cast<char*>(e)) {}
+    ibytestream(const char* b, std::size_t s) : std::istream(&buf), buf(const_cast<char*>(b), const_cast<char*>(b + s)) {}
 
 private:
     bytebuf buf;

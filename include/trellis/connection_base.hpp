@@ -73,51 +73,65 @@ public:
 
     template <typename F>
     void disconnect(const F& func) {
-        if (state == connection_state::DISCONNECTED) {
-            TRELLIS_LOG_ACTION("conn", connection_id, "Attempted to disconnect an already DISCONNECTED connection.");
-            return;
-        }
+        context->dispatch([this, func]() {
+            if (state == connection_state::DISCONNECTED) {
+                TRELLIS_LOG_ACTION("conn", connection_id, "Attempted to disconnect an already DISCONNECTED connection.");
+                return;
+            }
 
-        TRELLIS_LOG_ACTION("conn", connection_id, "Disconnecting.");
+            TRELLIS_LOG_ACTION("conn", connection_id, "Disconnecting.");
 
-        state = connection_state::DISCONNECTED;
+            state = connection_state::DISCONNECTED;
 
-        auto buffer = context->make_pending_buffer();
-        auto type = headers::type::DISCONNECT;
-        std::memcpy(buffer.data(), &type, sizeof(type));
+            auto buffer = context->make_pending_buffer();
+            auto type = headers::type::DISCONNECT;
+            std::memcpy(buffer.data(), &type, sizeof(type));
 
-        TRELLIS_LOG_DATAGRAM("d/cn", buffer, sizeof(type));
+            TRELLIS_LOG_DATAGRAM("d/cn", buffer, sizeof(type));
 
-        context->get_socket().async_send_to(
-            buffer.buffer(sizeof(type)),
-            client_endpoint,
-            [buffer, func, self = this->shared_from_this()]([[maybe_unused]] asio::error_code ec, [[maybe_unused]] std::size_t size) {
-                if (!ec) {
-                    TRELLIS_LOG_ACTION("conn", self->connection_id, "Sent DISCONNECT successfully, killing connection.");
-                } else {
-                    TRELLIS_LOG_ACTION("conn", self->connection_id, "Something went wrong when sending DISCONNECT: ", ec.category().name(), ": ", ec.message(), "Killing connection.");
-                }
-                self->context->kill(*self);
-                func();
-            });
+            context->get_socket().async_send_to(
+                buffer.buffer(sizeof(type)),
+                client_endpoint,
+                context->bind_executor([buffer, func, self = this->shared_from_this()]([[maybe_unused]] asio::error_code ec, [[maybe_unused]] std::size_t size) {
+                    if (!ec) {
+                        TRELLIS_LOG_ACTION("conn", self->connection_id, "Sent DISCONNECT successfully, killing connection.");
+                    } else {
+                        TRELLIS_LOG_ACTION("conn", self->connection_id, "Something went wrong when sending DISCONNECT: ", ec.category().name(), ": ", ec.message(), "Killing connection.");
+                    }
+                    self->context->kill(*self, {});
+                    func();
+                }));
+        });
     }
 
 protected:
     void set_state(connection_state s) {
+        // should only be called from derived connections, so we should be in the networking thread
+        assert(get_context().is_thread_current());
+
         state = s;
     }
 
     /** Sends a datagram. */
     void send_raw(const shared_datagram_buffer& data, std::size_t count) {
-        if (state == connection_state::DISCONNECTED) return;
+        get_context().dispatch([wptr = weak_from_this(), data, count]{
+            auto ptr = wptr.lock();
 
-        TRELLIS_LOG_DATAGRAM("send_raw", data, count);
+            if (!ptr) return;
 
-        context->get_socket().async_send_to(data.buffer(count), client_endpoint, [data, ptr = shared_from_this()](asio::error_code ec, [[maybe_unused]] std::size_t size) {
-            if (ec) {
-                TRELLIS_LOG_ACTION("conn", ptr->connection_id, "ERROR send_raw: ", ec.category().name(), ": ", ec.message());
-                ptr->context->connection_error(*ptr, ec);
-            }
+            if (ptr->state == connection_state::DISCONNECTED) return;
+
+            TRELLIS_LOG_DATAGRAM("send_raw", data, count);
+
+            ptr->context->get_socket().async_send_to(
+                data.buffer(count),
+                ptr->client_endpoint,
+                ptr->context->bind_executor([data, ptr](asio::error_code ec, [[maybe_unused]] std::size_t size) {
+                    if (ec) {
+                        TRELLIS_LOG_ACTION("conn", ptr->connection_id, "ERROR send_raw: ", ec.category().name(), ": ", ec.message());
+                        ptr->context->connection_error(*ptr, ec);
+                    }
+                }));
         });
     }
 
@@ -126,6 +140,9 @@ protected:
      * Changes state from INACTIVE to CONNECTING, and sends CONNECT messages in a loop until receive_connect_ok() is called.
      */
     void send_connect() {
+        // should only be called from parent context, so we should be in the networking thread
+        assert(get_context().is_thread_current());
+
         if (!handshake) {
             TRELLIS_LOG_ACTION("conn", connection_id, "Client starting handshake. Now CONNECTING.");
 
@@ -153,7 +170,7 @@ protected:
         // 200ms for now, should probably be dynamic in the future.
         handshake->timer.expires_from_now(std::chrono::milliseconds{200});
 
-        handshake->timer.async_wait(weak_from_this(), [this](asio::error_code ec) {
+        handshake->timer.async_wait(weak_from_this(), context->bind_executor([this](asio::error_code ec) {
             if (ec == asio::error::operation_aborted) {
                 return;
             }
@@ -168,7 +185,7 @@ protected:
             send_raw(handshake->buffer, sizeof(headers::type));
 
             send_connect();
-        });
+        }));
     }
 
     /**
@@ -181,6 +198,9 @@ protected:
      */
     template <typename F>
     void receive_connect_ok(const headers::connect_ok& connect_ok, const F& on_establish) {
+        // should only be called from parent context, so we should be in the networking thread
+        assert(get_context().is_thread_current());
+
         TRELLIS_LOG_ACTION("conn", connection_id, "Received CONNECT_OK (rcid:", connect_ok.connection_id, ").");
 
         // If state isn't CONNECTING then we don't change state, but still need to send CONNECT_ACK anyways.
@@ -215,6 +235,9 @@ protected:
      * Sends CONNECT_OK messages repeatedly until a CONNECT_ACK or DATA message is received.
      */
     void send_connect_ok() {
+        // should only be called from parent context, so we should be in the networking thread
+        assert(get_context().is_thread_current());
+
         if (!handshake) {
             // Since send_connect_ok() should only be called (externally) once per connection, we should be INACTIVE.
             assert(state == connection_state::INACTIVE);
@@ -251,7 +274,7 @@ protected:
             handshake->timer.expires_from_now(std::chrono::milliseconds{0});
         }
 
-        handshake->timer.async_wait(weak_from_this(), [this](asio::error_code ec) {
+        handshake->timer.async_wait(weak_from_this(), context->bind_executor([this](asio::error_code ec) {
             if (ec == asio::error::operation_aborted) {
                 return;
             }
@@ -269,7 +292,7 @@ protected:
             send_raw(handshake->buffer, size);
 
             send_connect_ok();
-        });
+        }));
     }
 
     /**
@@ -279,6 +302,9 @@ protected:
      */
     template <typename F>
     void receive_connect_ack(const F& on_establish) {
+        // should only be called from parent context, so we should be in the networking thread
+        assert(get_context().is_thread_current());
+
         if (state == connection_state::PENDING) {
             TRELLIS_LOG_ACTION("conn", connection_id, "Received CONNECT_ACK. Now ESTABLISHED.");
 
@@ -292,6 +318,9 @@ protected:
     }
 
     void cancel_handshake() {
+        // should only be called from this connection, so we should be in the networking thread
+        assert(get_context().is_thread_current());
+
         TRELLIS_LOG_ACTION("conn", connection_id, "Cancelling handshake.");
 
         // Can't cancel something that doesn't exist.
@@ -301,7 +330,10 @@ protected:
     }
 
     /** Disconnects without sending DISCONNECT to the peer. Peer will be forced to timeout. */
-    void disconnect_without_send() {
+    void disconnect_without_send(asio::error_code ec) {
+        // should only be called from parent context, so we should be in the networking thread
+        assert(get_context().is_thread_current());
+
         if (state == connection_state::DISCONNECTED) {
             TRELLIS_LOG_ACTION("conn", connection_id, "Attempted to disconnect_without_send an already DISCONNECTED connection.");
             return;
@@ -315,11 +347,14 @@ protected:
 
         state = connection_state::DISCONNECTED;
 
-        context->kill(*this);
+        context->kill(*this, ec);
     }
 
     /** Sends a DATA_ACK. */
     void send_ack(std::uint8_t cid, config::sequence_id_t sid, config::sequence_id_t eid, config::fragment_id_t fid) {
+        // should only be called from a channel's receive handler, so we should be in the networking thread
+        assert(get_context().is_thread_current());
+
         if (state == connection_state::DISCONNECTED) return;
 
         TRELLIS_LOG_ACTION("conn", connection_id, "Sending DATA_ACK (cid:", cid, ",sid:", sid, ",fid:", fid, ").");
@@ -344,7 +379,7 @@ private:
 
     context_base* context;
     protocol::endpoint client_endpoint;
-    connection_state state;
+    std::atomic<connection_state> state;
     std::uint16_t connection_id;
     std::optional<handshake_state> handshake;
 };

@@ -28,23 +28,22 @@ public:
     using typename base_type::protocol;
     using typename base_type::traits;
 
-    using connect_function = std::function<void(client_context&, const std::shared_ptr<connection_type>&)>;
-    using disconnect_function = std::function<void(client_context&, const std::shared_ptr<connection_type>&, asio::error_code)>;
-
     using base_type::get_context_id;
 
     client_context(asio::io_context& io) :
         base_type(io),
-        on_connect_func(),
-        on_disconnect_func(),
         conn(nullptr) {}
 
     void connect(const typename protocol::endpoint& client_endpoint, const typename protocol::endpoint& server_endpoint) {
-        assert(!on_connect_func);
+        // must be executed from user thread
+        assert(!this->is_thread_current());
 
         this->open(client_endpoint);
         conn = std::make_shared<connection_type>(*this, server_endpoint);
-        conn->send_connect();
+
+        this->dispatch([conn = conn]{
+            conn->send_connect();
+        });
     }
 
     auto get_endpoint() const -> typename protocol::endpoint {
@@ -62,24 +61,24 @@ public:
         }
     }
 
-    void on_connect(connect_function func) {
-        on_connect_func = std::move(func);
-    }
-
-    void on_disconnect(disconnect_function func) {
-        on_disconnect_func = std::move(func);
-    }
-
 protected:
-    virtual void kill(const connection_base& c) override {
+    virtual void kill(const connection_base& c, const asio::error_code& ec) override {
+        // should only be called from a connection's methods, so we should be in the networking thread
+        assert(this->is_thread_current());
+
         assert(&c == conn.get());
         TRELLIS_LOG_ACTION("client", get_context_id(), "Killing connection to ", conn->get_endpoint());
+
+        this->push_event(event_disconnect{conn, ec});
 
         conn = nullptr;
         this->stop();
     }
 
     virtual void connection_error(const connection_base& c, asio::error_code ec) override {
+        // should only be called from send and receive handlers, so we should be in the networking thread
+        assert(this->is_thread_current());
+
         if (conn && &c == conn.get()) {
             connection_error(conn, ec);
         }
@@ -88,6 +87,9 @@ protected:
 private:
     void receive(const datagram_buffer& buffer, const typename protocol::endpoint& sender_endpoint, std::size_t size) {
         TRELLIS_BEGIN_SECTION("client");
+
+        // should only be called from the base receive handler, so we should be in the networking thread
+        assert(this->is_thread_current());
 
         assert(conn);
 
@@ -117,10 +119,8 @@ private:
                 TRELLIS_LOG_ACTION("client", get_context_id(), "CONNECT_OK (scid:", header.connection_id, ") from server ", sender_endpoint, ".");
 
                 conn->receive_connect_ok(header, [this] {
-                    TRELLIS_LOG_ACTION("client", get_context_id(), "CONNECT_OK caused connection to become ESTABLISHED. Calling on_connect callback.");
-                    if (on_connect_func) {
-                        on_connect_func(*this, conn);
-                    }
+                    TRELLIS_LOG_ACTION("client", get_context_id(), "CONNECT_OK caused connection to become ESTABLISHED. Pushing event_connect.");
+                    this->push_event(event_connect{conn});
                 });
 
                 break;
@@ -134,7 +134,7 @@ private:
             case headers::type::DISCONNECT: {
                 TRELLIS_LOG_ACTION("client", get_context_id(), "DISCONNECT from server ", sender_endpoint, ". Disconnecting without response.");
 
-                conn->disconnect_without_send();
+                conn->disconnect_without_send({});
                 conn = nullptr;
                 break;
             }
@@ -156,11 +156,9 @@ private:
                     break;
                 }
 
-                auto& receive_func = this->get_receive_func(header.channel_id);
-
-                conn->receive(header, buffer, size, [this, &receive_func](std::istream& s) {
-                    receive_func(*this, conn, s);
-                }, [this] {
+                conn->receive(header, buffer, size, [&](raw_buffer&& data) {
+                    this->push_event(event_receive{conn, header.channel_id, std::move(data)});
+                }, [&] {
                     // This should be unreachable, since we check for ESTABLISHED above.
                     TRELLIS_LOG_ACTION("client", get_context_id(), "DATA caused connection to become ESTABLISHED. That's not supposed to happen. Disconnecting.");
                     conn->disconnect();
@@ -197,21 +195,23 @@ private:
     }
 
     void connection_error(const typename protocol::endpoint& endpoint, asio::error_code ec) {
+        // should only be called from send and receive handlers, so we should be in the networking thread
+        assert(this->is_thread_current());
+
         if (conn && endpoint == conn->get_endpoint()) {
             connection_error(conn, ec);
         }
     }
 
     void connection_error(const std::shared_ptr<connection_type>& ptr, asio::error_code ec) {
+        // should only be called from send and receive handlers, so we should be in the networking thread
+        assert(this->is_thread_current());
+
         assert(ptr);
-        if (on_disconnect_func) {
-            on_disconnect_func(*this, ptr, ec);
-        }
-        ptr->disconnect_without_send();
+        assert(ec);
+        ptr->disconnect_without_send(ec);
     }
 
-    connect_function on_connect_func;
-    disconnect_function on_disconnect_func;
     std::shared_ptr<connection_type> conn;
 };
 

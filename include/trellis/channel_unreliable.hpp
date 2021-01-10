@@ -7,6 +7,7 @@
 #include "logging.hpp"
 #include "streams.hpp"
 #include "connection_stats.hpp"
+#include "raw_buffer.hpp"
 
 #include <string_view>
 
@@ -32,6 +33,9 @@ public:
     }
 
     void receive_ack(const headers::data_ack& header) {
+        // should only be called from the connections's receive handler, so we should be in the networking thread
+        assert(conn->get_context().is_thread_current());
+
         TRELLIS_LOG_ACTION("channel", +header.channel_id, "Received unexpected DATA_ACK (sid:", header.sequence_id, ",fid:", header.fragment_id, "). Disconnecting.");
         conn->disconnect();
     }
@@ -44,7 +48,10 @@ public:
     }
 
 protected:
-    auto receive_impl(const headers::data& header, const datagram_buffer& datagram, size_t count) -> std::optional<std::string_view> {
+    auto receive_impl(const headers::data& header, const datagram_buffer& datagram, size_t count) -> std::optional<raw_buffer> {
+        // should only be called from the connections's receive handler, so we should be in the networking thread
+        assert(conn->get_context().is_thread_current());
+
         assert(count <= config::datagram_size);
         assert(count >= headers::data_offset);
 
@@ -60,7 +67,11 @@ protected:
 
             assert(count <= config::datagram_size);
 
-            return std::string_view{b, static_cast<std::size_t>(e - b)};
+            auto data = std::make_unique<char[]>(e - b);
+
+            std::copy(b, e, data.get());
+
+            return raw_buffer{std::move(data), static_cast<std::size_t>(e - b)};
         } else {
             TRELLIS_LOG_ACTION("channel", +header.channel_id, "Processing message ", header.sequence_id, " as fragment piece ", +header.fragment_id, " / ", +header.fragment_count, ".");
 
@@ -90,7 +101,7 @@ protected:
                 if (assembler.is_complete()) {
                     TRELLIS_LOG_ACTION("channel", +header.channel_id, "Message reassembly is complete.");
 
-                    return std::string_view{assembler.data(), assembler.size()};
+                    return raw_buffer{assembler.release(), assembler.size()};
                 } else {
                     return std::nullopt;
                 }
@@ -101,7 +112,7 @@ protected:
     }
 
     connection_base* conn;
-    config::sequence_id_t sequence_id;
+    std::atomic<config::sequence_id_t> sequence_id;
     std::array<fragment_assembler, config::assembler_slots> assemblers;
 };
 

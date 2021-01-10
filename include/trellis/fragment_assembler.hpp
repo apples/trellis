@@ -99,6 +99,11 @@ public:
         buffer_capacity = 0;
     }
 
+    auto release() -> std::unique_ptr<char[]> {
+        buffer_capacity = 0;
+        return std::move(buffer);
+    }
+
     bool is_cancelled() const {
         return sequence_id && !buffer;
     }

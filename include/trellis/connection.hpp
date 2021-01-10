@@ -101,6 +101,9 @@ private:
     /** Do not use. Call the other overload instead. */
     template <typename F, typename G, std::size_t... Is>
     void receive(const headers::data& header, const datagram_buffer& datagram, std::size_t count, const F& data_handler, const G& on_establish, std::index_sequence<Is...>) {
+        // should only be called from the context's receive handler, so we should be in the networking thread
+        assert(get_context().is_thread_current());
+
         // If still pending, go ahead and establish. We haven't received a CONNECT_ACK yet, but we'll still allow the client to start sending DATA.
         if (get_state() == connection_state::PENDING) {
             TRELLIS_LOG_ACTION("conn", get_connection_id(), "Received DATA while PENDING. Now ESTABLISHED.");
@@ -127,6 +130,9 @@ private:
     /** Do not use. Call the other overload instead. */
     template <std::size_t... Is>
     void receive_ack(const headers::data_ack& header, std::index_sequence<Is...>) {
+        // should only be called from the context's receive handler, so we should be in the networking thread
+        assert(get_context().is_thread_current());
+
         // Only ESTABLISHED connections should receive DATA_ACK messages.
         assert(get_state() == connection_state::ESTABLISHED);
 

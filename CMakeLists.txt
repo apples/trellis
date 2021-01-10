@@ -30,6 +30,7 @@ target_include_directories(trellis INTERFACE
     "${ASIO_DIR}/include")
 target_link_libraries(trellis INTERFACE ${OS_LIBS})
 target_compile_definitions(trellis INTERFACE ${OS_DEFINITIONS})
+target_compile_features(trellis INTERFACE cxx_std_20)
 
 # tests
 
@@ -41,7 +42,7 @@ add_executable(trellis_tests
     tests/channel_reliable_ordered.cpp
     tests/channel_reliable_unordered.cpp
     tests/channel_reliable_sequenced.cpp)
-set_property(TARGET trellis_tests PROPERTY CXX_STANDARD 17)
+target_compile_features(trellis_tests PRIVATE cxx_std_17)
 target_link_libraries(trellis_tests trellis)
 
 # ping-pong example
@@ -49,14 +50,14 @@ target_link_libraries(trellis_tests trellis)
 set(PINGPONG_COMMON examples/pingpong/channels.hpp)
 
 add_executable(pingpong_client examples/pingpong/client/main.cpp ${PINGPONG_COMMON})
-set_property(TARGET pingpong_client PROPERTY CXX_STANDARD 17)
+target_compile_features(pingpong_client PRIVATE cxx_std_17)
 target_link_libraries(pingpong_client trellis)
 target_include_directories(pingpong_client PRIVATE
     "${CEREAL_DIR}/include")
 target_compile_definitions(pingpong_client PRIVATE TRELLIS_ENABLE_LOGGING)
 
 add_executable(pingpong_server examples/pingpong/server/main.cpp ${PINGPONG_COMMON})
-set_property(TARGET pingpong_server PROPERTY CXX_STANDARD 17)
+target_compile_features(pingpong_server PRIVATE cxx_std_17)
 target_link_libraries(pingpong_server trellis)
 target_include_directories(pingpong_server PRIVATE
     "${CEREAL_DIR}/include")
@@ -69,7 +70,7 @@ add_executable(proxy_example
     examples/proxy/channels.hpp
     examples/proxy/message.hpp
     examples/proxy/overload.hpp)
-set_property(TARGET proxy_example PROPERTY CXX_STANDARD 17)
+target_compile_features(proxy_example PRIVATE cxx_std_17)
 target_link_libraries(proxy_example trellis)
 target_include_directories(proxy_example PRIVATE
     "${CEREAL_DIR}/include")
@@ -92,7 +93,7 @@ if(SDL2_FOUND)
         examples/asteroids/glad/src/glad.c
         examples/asteroids/glad/include/glad/glad.h
         examples/asteroids/glad/include/KHR/khrplatform.h)
-    set_property(TARGET asteroids_example PROPERTY CXX_STANDARD 17)
+    target_compile_features(asteroids_example PRIVATE cxx_std_17)
     target_link_libraries(asteroids_example
         trellis
         SDL2::SDL2)

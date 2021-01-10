@@ -11,9 +11,11 @@ public:
 
     template <typename F>
     void receive(const headers::data& header, const datagram_buffer& datagram, size_t count, const F& on_receive_func) {
+        // should only be called from the connections's receive handler, so we should be in the networking thread
+        assert(conn->get_context().is_thread_current());
+
         if (auto data = receive_impl(header, datagram, count)) {
-            auto istream = ibytestream(data->begin(), data->end());
-            on_receive_func(istream);
+            on_receive_func(*data);
         }
     }
 };

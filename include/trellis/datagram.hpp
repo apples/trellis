@@ -12,16 +12,19 @@
 
 namespace trellis {
 
-struct datagram_buffer {
-    std::array<char, config::datagram_size> data;
-    int refcount = 0;
-};
-
-using datagram_buffer_list = std::list<datagram_buffer>;
-using datagram_buffer_iterator = datagram_buffer_list::iterator;
+using datagram_storage = std::array<char, config::datagram_size>;
 
 class datagram_buffer_cache;
 
+/** Acts as a datagram_storage with a shared_ptr control block. */
+struct datagram_buffer {
+    datagram_storage data;
+    std::atomic<int> refcount = 0;
+    datagram_buffer* next = nullptr;
+    datagram_buffer_cache* cache = nullptr;
+};
+
+/** Similar to a shared_ptr<datagram_storage>, but also provides direct access to the underlying storage. */
 class shared_datagram_buffer {
 public:
     friend class datagram_buffer_cache;
@@ -38,6 +41,8 @@ public:
 
     ~shared_datagram_buffer();
 
+    explicit operator bool() const;
+
     auto buffer(std::size_t size = config::datagram_size) -> asio::mutable_buffer;
 
     auto buffer(std::size_t size = config::datagram_size) const -> asio::const_buffer;
@@ -52,160 +57,180 @@ public:
 
     auto size() const -> std::size_t;
 
+    /** Fills the storage with zeroes. */
     void clear();
 
 private:
-    shared_datagram_buffer(datagram_buffer_cache& cache, datagram_buffer_iterator iter);
+    explicit shared_datagram_buffer(datagram_buffer* iter);
 
-    datagram_buffer_cache* cache;
-    datagram_buffer_iterator iter;
+    datagram_buffer* iter;
 };
 
+/** A simple allocator for datagram_buffers that maintains a free list. */
 class datagram_buffer_cache {
 public:
     friend class shared_datagram_buffer;
 
     datagram_buffer_cache() :
-        pending_buffers(),
-        free_buffers() {}
+        free_buffers(nullptr) {}
+
+    ~datagram_buffer_cache() {
+        auto buf = free_buffers.load();
+        while (buf) {
+            auto next = buf->next;
+            delete buf;
+            buf = next;
+        }
+    }
 
     auto make_pending_buffer() -> shared_datagram_buffer {
-        if (free_buffers.empty()) {
-            free_buffers.emplace(free_buffers.end());
+        auto iter = free_buffers.load();
+        if (iter) {
+            while (!free_buffers.compare_exchange_strong(iter, iter->next));
+            iter->next = nullptr;
+        } else {
+            iter = new datagram_buffer{};
+            iter->cache = this;
         }
 
-        assert(!free_buffers.empty());
+        assert(iter);
+        assert(iter->cache == this);
 
-        auto iter = free_buffers.begin();
-
-        pending_buffers.splice(pending_buffers.end(), free_buffers, iter);
-
-        return {*this, iter};
+        return shared_datagram_buffer{iter};
     }
 
 private:
-    void free_pending_buffer(datagram_buffer_iterator iter) {
-        // If the list is empty, we can't possibly free anything.
-        assert(!pending_buffers.empty());
-
-        // The iterator must be valid, otherwise this is probably a double-free.
-        assert([&]{
-            for (auto i = pending_buffers.begin(); i != pending_buffers.end(); ++i) {
-                if (i == iter) return true;
-            }
-            return false;
-        }());
-
-        // Buffers being freed should always have zero refcount.
+    void free_pending_buffer(datagram_buffer* iter) {
+        assert(iter);
         assert(iter->refcount == 0);
+        assert(iter->cache == this);
 
-        free_buffers.splice(free_buffers.end(), pending_buffers, iter);
+        auto first = free_buffers.load();
+        iter->next = first;
+
+        while (!free_buffers.compare_exchange_strong(first, iter)) {
+            iter->next = first;
+        }
     }
 
-    datagram_buffer_list pending_buffers;
-    datagram_buffer_list free_buffers;
+    std::atomic<datagram_buffer*> free_buffers;
 };
 
-
-inline shared_datagram_buffer::shared_datagram_buffer() :
-    cache(nullptr),
-    iter() {}
+inline shared_datagram_buffer::shared_datagram_buffer() : iter(nullptr) {}
 
 inline shared_datagram_buffer::shared_datagram_buffer(shared_datagram_buffer&& other) :
-    cache(std::exchange(other.cache, nullptr)),
-    iter(std::move(other.iter)) {
-        assert(!cache || iter->refcount > 0);
-        assert(!other.cache);
+    iter(std::exchange(other.iter, nullptr)) {
+        assert(!iter || iter->refcount > 0);
+
+        // other should always be left empty
+        assert(!other.iter);
     }
 
 inline shared_datagram_buffer::shared_datagram_buffer(const shared_datagram_buffer& other) :
-    cache(other.cache),
     iter(other.iter) {
-        if (cache) {
+        if (iter) {
             assert(iter->refcount > 0);
-            ++(iter->refcount);
+            ++iter->refcount;
         }
     }
 
 inline shared_datagram_buffer& shared_datagram_buffer::operator=(shared_datagram_buffer&& other) {
     assert(this != &other);
-    assert(!cache || iter->refcount > 0);
-    if (cache && --(iter->refcount) == 0) {
-        cache->free_pending_buffer(iter);
-    }
-    cache = std::exchange(other.cache, nullptr);
-    iter = std::move(other.iter);
+
+    // swap iters, the current iter will be released in other's destructor
+    std::swap(iter, other.iter);
+
+    assert(!iter || iter->refcount > 0);
+
     return *this;
 }
 
 inline shared_datagram_buffer& shared_datagram_buffer::operator=(const shared_datagram_buffer& other) {
-    if (this == &other) return *this;
-    assert(!cache || iter->refcount > 0);
-    if (cache && --(iter->refcount) == 0) {
-        cache->free_pending_buffer(iter);
+    assert(!iter || iter->refcount > 0);
+
+    // short-circuit if this and other have the same iter
+    if (this == &other || iter == other.iter) {
+        return *this;
     }
-    cache = other.cache;
+
+    // decrement refcount and maybe free the current iter
+    if (iter && --iter->refcount == 0) {
+        iter->cache->free_pending_buffer(iter);
+    }
+
+    // copy
     iter = other.iter;
-    if (cache) {
+
+    // increment refcount
+    if (iter) {
         assert(iter->refcount > 0);
-        ++(iter->refcount);
+        ++iter->refcount;
     }
-    assert(!cache || iter->refcount > 0);
+
+    // refcount must be a least 2: this and other
+    assert(!iter || iter->refcount >= 2);
+
     return *this;
 }
 
 inline shared_datagram_buffer::~shared_datagram_buffer() {
-    assert(!cache || iter->refcount > 0);
-    if (cache && --(iter->refcount) == 0) {
-        cache->free_pending_buffer(iter);
+    assert(!iter || iter->refcount > 0);
+
+    // decrement refcount and maybe free iter
+    if (iter && --iter->refcount == 0) {
+        iter->cache->free_pending_buffer(iter);
     }
 }
 
+inline shared_datagram_buffer::operator bool() const {
+    return bool(iter);
+}
+
 inline auto shared_datagram_buffer::buffer(std::size_t size) -> asio::mutable_buffer {
-    assert(cache && iter->refcount > 0);
+    assert(iter && iter->refcount > 0);
     return asio::buffer(iter->data, size);
 }
 
 inline auto shared_datagram_buffer::buffer(std::size_t size) const -> asio::const_buffer {
-    assert(cache && iter->refcount > 0);
+    assert(iter && iter->refcount > 0);
     return asio::buffer(iter->data, size);
 }
 
 inline auto shared_datagram_buffer::operator[](std::size_t i) -> char& {
-    assert(cache && iter->refcount > 0);
+    assert(iter && iter->refcount > 0);
     return iter->data[i];
 }
 
 inline auto shared_datagram_buffer::operator[](std::size_t i) const -> const char& {
-    assert(cache && iter->refcount > 0);
+    assert(iter && iter->refcount > 0);
     return iter->data[i];
 }
 
 inline auto shared_datagram_buffer::data() -> char* {
-    assert(cache && iter->refcount > 0);
+    assert(iter && iter->refcount > 0);
     return iter->data.data();
 }
 
 inline auto shared_datagram_buffer::data() const -> const char* {
-    assert(cache && iter->refcount > 0);
+    assert(iter && iter->refcount > 0);
     return iter->data.data();
 }
 
 inline auto shared_datagram_buffer::size() const -> std::size_t {
-    assert(cache && iter->refcount > 0);
+    assert(iter && iter->refcount > 0);
     return iter->data.size();
 }
 
 inline void shared_datagram_buffer::clear() {
-    assert(cache && iter->refcount > 0);
+    assert(iter && iter->refcount > 0);
     iter->data.fill('\0');
 }
 
-inline shared_datagram_buffer::shared_datagram_buffer(datagram_buffer_cache& cache, datagram_buffer_iterator iter) :
-    cache(&cache),
+inline shared_datagram_buffer::shared_datagram_buffer(datagram_buffer* iter) :
     iter(iter) {
+        assert(iter);
         assert(iter->refcount == 0);
-        ++(iter->refcount);
+        ++iter->refcount;
     }
 
 } // namespace trellis

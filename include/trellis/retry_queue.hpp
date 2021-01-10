@@ -193,7 +193,9 @@ private:
         [[maybe_unused]] auto cancelled = timer.expires_at(queue.front().when);
         assert(cancelled <= 1);
 
-        timer.async_wait(guard, [this](asio::error_code ec, const guard_ptr& weak_guard) {
+        auto exec = asio::get_associated_executor(callback);
+
+        timer.async_wait(guard, asio::bind_executor(exec, [this](asio::error_code ec, const guard_ptr& weak_guard) {
             if (ec == asio::error::operation_aborted) {
                 return;
             }
@@ -225,7 +227,7 @@ private:
 
                 reset_timer(weak_guard);
             }
-        });
+        }));
     }
 
     std::vector<retry_entry> queue;

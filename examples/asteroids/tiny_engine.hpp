@@ -401,9 +401,7 @@ public:
         io(&io),
         window{},
         gl_context{},
-        running{false},
-        io_mutex{},
-        io_cv{} {
+        running{false} {
             // Require OpenGL 4.3 Core profile
             SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
             SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 4);
@@ -468,13 +466,11 @@ public:
     void main_loop() {
         running = true;
 
+        auto work_guard = asio::make_work_guard(*io);
+
         // IO thread for networking
         auto io_thread = std::thread([this]{
-            while (running) {
-                auto lock = std::unique_lock(io_mutex);
-                io->run();
-                io_cv.wait(lock, [&]{ return !running || !io->stopped(); });
-            }
+            io->run();
         });
 
         // Rendering "thread"
@@ -482,11 +478,6 @@ public:
             while (running) {
                 // Window event polling
                 for (auto event = SDL_Event{}; running && SDL_PollEvent(&event);) {
-                    // Stop the IO thread
-                    io->stop();
-
-                    auto lock = std::lock_guard(io_mutex);
-
                     switch (event.type) {
                         case SDL_QUIT:
                             running = false;
@@ -497,18 +488,9 @@ public:
                             }
                             break;
                     }
-
-                    // Restart IO thread
-                    io->restart();
-                    io_cv.notify_one();
                 }
 
                 {
-                    // Stop the IO thread
-                    io->stop();
-
-                    auto lock = std::lock_guard(io_mutex);
-
                     // Scene update and render
                     if (scene) {
                         scene->update(*this);
@@ -523,10 +505,6 @@ public:
                         queued_scene(*this);
                         queued_scene = {};
                     }
-
-                    // Restart IO thread
-                    io->restart();
-                    io_cv.notify_one();
                 }
 
                 // Swap buffers (vsync)
@@ -536,7 +514,6 @@ public:
 
         // Stop IO thread
         io->stop();
-        io_cv.notify_one();
         io_thread.join();
 
         // Destroy scene
@@ -554,6 +531,4 @@ private:
     std::unique_ptr<tiny_scene_base> scene;
     std::function<void(tiny_engine& e)> queued_scene;
     std::atomic<bool> running;
-    std::mutex io_mutex;
-    std::condition_variable io_cv;
 };
