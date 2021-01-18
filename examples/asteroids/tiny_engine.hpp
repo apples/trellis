@@ -37,6 +37,12 @@ inline tiny_scene_base::~tiny_scene_base() = default;
 /// 2D Texture
 class tiny_texture {
 public:
+    tiny_texture() : handle(0), x(0), y(0) {}
+
+    tiny_texture(GLenum format, int w, int h, void* data) : handle(0), x(w), y(h) {
+        init(format, data);
+    }
+    
     tiny_texture(const std::string& fname) : handle(0), x(0), y(0) {
         auto n = 0;
         auto data = stbi_load(fname.c_str(), &x, &y, &n, 4);
@@ -46,17 +52,25 @@ public:
             std::terminate();
         }
 
-        glGenTextures(1, &handle);
-        glBindTexture(GL_TEXTURE_2D, handle);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, x, y, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+        init(GL_RGBA, data);
 
         stbi_image_free(data);
     }
+    
+    tiny_texture(tiny_texture&& other) : handle(std::exchange(other.handle, 0)), x(std::exchange(other.x, 0)), y(std::exchange(other.y, 0)) {}
+
+    tiny_texture& operator=(tiny_texture&& other) {
+        glDeleteTextures(1, &handle);
+        handle = std::exchange(other.handle, 0);
+        x = std::exchange(other.x, 0);
+        y = std::exchange(other.y, 0);
+        return *this;
+    }
+
+    tiny_texture(const tiny_texture&) = delete;
+    tiny_texture& operator=(const tiny_texture&) = delete;
 
     ~tiny_texture() {
-        assert(handle != 0);
         glDeleteTextures(1, &handle);
     }
 
@@ -78,11 +92,22 @@ public:
     }
 
 private:
+    void init(GLenum format, void* data) {
+        glGenTextures(1, &handle);
+        glBindTexture(GL_TEXTURE_2D, handle);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexImage2D(GL_TEXTURE_2D, 0, format, x, y, 0, format, GL_UNSIGNED_BYTE, data);
+    }
+
     GLuint handle;
     int x;
     int y;
 };
 
+/// Mesh vertex
 struct tiny_vertex {
     GLfloat x;
     GLfloat y;
@@ -93,6 +118,7 @@ struct tiny_vertex {
 static_assert(sizeof(tiny_vertex) == sizeof(GLfloat) * 5);
 static_assert(alignof(tiny_vertex) == alignof(GLfloat));
 
+/// Mesh triangle
 struct tiny_triangle {
     GLuint v[3];
 };
@@ -158,6 +184,63 @@ private:
     GLuint vertex_buffer;
     GLuint element_buffer;
     GLsizei count;
+};
+
+/// Framebuffer
+class tiny_framebuffer {
+public:
+    tiny_framebuffer(int w, int h) :
+        x(w),
+        y(h),
+        color(GL_RGBA, w, h, nullptr),
+        depth(GL_DEPTH_COMPONENT, w, h, nullptr),
+        framebuffer(0) {
+            glGenFramebuffers(1, &framebuffer);
+            glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+            glFramebufferTexture(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, color.get(), 0);
+            glFramebufferTexture(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, depth.get(), 0);
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        }
+
+    tiny_framebuffer(tiny_framebuffer&& other) :
+        x(std::exchange(other.x, 0)),
+        y(std::exchange(other.y, 0)),
+        color(std::move(other.color)),
+        depth(std::move(other.depth)),
+        framebuffer(std::exchange(other.framebuffer, 0)) {}
+
+    tiny_framebuffer& operator=(tiny_framebuffer&& other) {
+        glDeleteFramebuffers(1, &framebuffer);
+        x = std::exchange(other.x, 0);
+        y = std::exchange(other.y, 0);
+        color = std::move(other.color);
+        depth = std::move(other.depth);
+        framebuffer = std::exchange(other.framebuffer, 0);
+        return *this;
+    }
+
+    tiny_framebuffer(const tiny_framebuffer&) = delete;
+    tiny_framebuffer& operator=(const tiny_framebuffer&) = delete;
+
+    ~tiny_framebuffer() {
+        glDeleteFramebuffers(1, &framebuffer);
+    }
+
+    auto bind() {
+        glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+        glViewport(0, 0, x, y);
+    }
+
+    void bind_texture(int i = 0) {
+        color.bind(i);
+    }
+
+private:
+    int x;
+    int y;
+    tiny_texture color;
+    tiny_texture depth;
+    GLuint framebuffer;
 };
 
 /// Shader program
@@ -294,113 +377,19 @@ private:
     std::unordered_map<std::string, uniform> uniforms;
 };
 
-inline const char* const tiny_vert_shader = R"(#version 430 core
-in vec3 VertexPosition;
-in vec2 VertexTexCoord;
-
-uniform mat4 MVP;
-uniform mat3 TexCoordMat;
-
-out vec2 texcoord;
-
-void main() {
-    gl_Position = MVP * vec4(VertexPosition, 1.0);
-    texcoord = vec2(TexCoordMat * vec3(VertexTexCoord, 1.0));
-}
-)";
-
-inline const char* const tiny_frag_shader = R"(#version 430 core
-in vec2 texcoord;
-
-uniform sampler2D DiffuseTex;
-
-out vec4 FragColor;
-
-void main() {
-    FragColor = texture(DiffuseTex, texcoord);
-    if (FragColor.a == 0.0) discard;
-}
-)";
-
-inline constexpr tiny_vertex tiny_sprite_vertices[] = {
-    {-0.5f, 0.5f, 0.f, 0.f, 0.f},
-    {0.5f, 0.5f, 0.f, 1.f, 0.f},
-    {0.5f, -0.5f, 0.f, 1.f, 1.f},
-    {-0.5f, -0.5f, 0.f, 0.f, 1.f},
-};
-
-inline constexpr tiny_triangle tiny_sprite_tris[] = {
-    {{0, 1, 2}},
-    {{2, 3, 0}},
-};
-
-/// 2D graphics routines
-class tiny_renderer {
-public:
-    tiny_renderer(tiny_engine&) :
-        shader(tiny_vert_shader, tiny_frag_shader),
-        sprite_mesh(tiny_sprite_vertices, 4, tiny_sprite_tris, 2),
-        proj_mat(tiny_matrix<4>::identity()),
-        view_mat(tiny_matrix<4>::identity()) {}
-
-    void set_camera_size(tiny_vec<2> size) {
-        auto zrange = 10.f;
-        proj_mat = tiny_matrix<4>::identity();
-        proj_mat[0][0] = 2.f / size.x;
-        proj_mat[1][1] = 2.f / size.y;
-        proj_mat[2][2] = - 2.f / zrange;
-    }
-
-    void set_camera_pos(tiny_vec<2> pos) {
-        view_mat = tiny_matrix<4>::identity();
-        view_mat[3][0] = -pos.x;
-        view_mat[3][1] = -pos.y;
-    }
-
-    void draw_sprite(tiny_vec<2> pos, tiny_vec<2> size, tiny_texture& texture, tiny_vec<2> px_origin, tiny_vec<2> px_size) {
-        auto wh = tiny_vec<2>{float(texture.width()), float(texture.height())};
-        auto uv_origin = px_origin / wh;
-        auto uv_size = px_size / wh;
-
-        auto uv_mat = tiny_matrix<3>::identity();
-        uv_mat[0][0] = uv_size.x;
-        uv_mat[1][1] = uv_size.y;
-        uv_mat[2][0] = uv_origin.x;
-        uv_mat[2][1] = uv_origin.y;
-
-        auto model_mat = tiny_matrix<4>::identity();
-        model_mat[0][0] = size.x;
-        model_mat[1][1] = size.y;
-        model_mat[3][0] = pos.x;
-        model_mat[3][1] = pos.y;
-
-        auto mvp = proj_mat * view_mat * model_mat;
-
-        shader.use();
-        shader.set_uniform("MVP", mvp);
-        shader.set_uniform("TexCoordMat", uv_mat);
-        shader.set_uniform("DiffuseTex", 0);
-
-        texture.bind(0);
-        sprite_mesh.draw();
-    }
-
-private:
-    tiny_shader shader;
-    tiny_mesh sprite_mesh;
-    tiny_matrix<4> proj_mat;
-    tiny_matrix<4> view_mat;
-};
-
 /// Main engine
 class tiny_engine {
 public:
     using clock = std::chrono::steady_clock;
 
-    tiny_engine(asio::io_context& io, const std::string& name) :
+    tiny_engine(asio::io_context& io, const std::string& name, int w, int h) :
         io(&io),
         window{},
         gl_context{},
+        scene(),
+        queued_scene(),
+        w(w),
+        h(h),
         running{false} {
             // Require OpenGL 4.3 Core profile
             SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
@@ -411,8 +400,8 @@ public:
                 name.c_str(),
                 SDL_WINDOWPOS_CENTERED,
                 SDL_WINDOWPOS_CENTERED,
-                800,
-                600,
+                w,
+                h,
                 SDL_WINDOW_OPENGL);
 
             if (!window) {
@@ -473,7 +462,7 @@ public:
             io->run();
         });
 
-        // Rendering "thread"
+        // Main "thread"
         [&]{
             while (running) {
                 // Window event polling
@@ -481,7 +470,7 @@ public:
                     switch (event.type) {
                         case SDL_QUIT:
                             running = false;
-                            return; // breaks out of lambda
+                            return; // exit main thread
                         default:
                             if (scene) {
                                 scene->handle_event(*this, event);
@@ -490,21 +479,19 @@ public:
                     }
                 }
 
-                {
-                    // Scene update and render
-                    if (scene) {
-                        scene->update(*this);
+                // Scene update and render
+                if (scene) {
+                    scene->update(*this);
 
-                        glClearColor(0, 0, 0, 1);
-                        glClear(GL_COLOR_BUFFER_BIT);
-                        scene->draw(*this);
-                    }
+                    glClearColor(0, 0, 0, 1);
+                    glClear(GL_COLOR_BUFFER_BIT);
+                    scene->draw(*this);
+                }
 
-                    // Queued scene transition
-                    if (queued_scene) {
-                        queued_scene(*this);
-                        queued_scene = {};
-                    }
+                // Queued scene transition
+                if (queued_scene) {
+                    queued_scene(*this);
+                    queued_scene = {};
                 }
 
                 // Swap buffers (vsync)
@@ -524,11 +511,164 @@ public:
         running = false;
     }
 
+    int width() const {
+        return w;
+    }
+
+    int height() const {
+        return h;
+    }
+
 private:
     asio::io_context* io;
     SDL_Window* window;
     SDL_GLContext gl_context;
     std::unique_ptr<tiny_scene_base> scene;
     std::function<void(tiny_engine& e)> queued_scene;
+    int w;
+    int h;
     std::atomic<bool> running;
+};
+
+inline const char* const tiny_vert_shader = R"(#version 430 core
+in vec3 VertexPosition;
+in vec2 VertexTexCoord;
+
+uniform mat4 MVP;
+uniform mat3 TexCoordMat;
+
+out vec2 texcoord;
+
+void main() {
+    gl_Position = MVP * vec4(VertexPosition, 1.0);
+    texcoord = vec2(TexCoordMat * vec3(VertexTexCoord, 1.0));
+}
+)";
+
+inline const char* const tiny_frag_shader = R"(#version 430 core
+in vec2 texcoord;
+
+uniform sampler2D DiffuseTex;
+
+out vec4 FragColor;
+
+void main() {
+    FragColor = texture(DiffuseTex, texcoord);
+    if (FragColor.a == 0.0) discard;
+}
+)";
+
+inline constexpr tiny_vertex tiny_sprite_vertices[] = {
+    {-0.5f, 0.5f, 0.f, 0.f, 0.f},
+    {0.5f, 0.5f, 0.f, 1.f, 0.f},
+    {0.5f, -0.5f, 0.f, 1.f, 1.f},
+    {-0.5f, -0.5f, 0.f, 0.f, 1.f},
+};
+
+inline constexpr tiny_triangle tiny_sprite_tris[] = {
+    {{0, 1, 2}},
+    {{2, 3, 0}},
+};
+
+inline constexpr tiny_vertex tiny_screen_vertices[] = {
+    {-1.f, -1.f, 0.f, 0.f, 0.f},
+    {1.f, -1.f, 0.f, 1.f, 0.f},
+    {1.f, 1.f, 0.f, 1.f, 1.f},
+    {-1.f, 1.f, 0.f, 0.f, 1.f},
+};
+
+inline constexpr tiny_triangle tiny_screen_tris[] = {
+    {{0, 1, 2}},
+    {{2, 3, 0}},
+};
+
+/// 2D graphics routines
+class tiny_renderer {
+public:
+    tiny_renderer(tiny_engine& e, int w, int h) :
+        engine(&e),
+        screen(w, h),
+        shader(tiny_vert_shader, tiny_frag_shader),
+        sprite_mesh(tiny_sprite_vertices, 4, tiny_sprite_tris, 2),
+        screen_mesh(tiny_screen_vertices, 4, tiny_screen_tris, 2),
+        proj_mat(tiny_matrix<4>::identity()),
+        view_mat(tiny_matrix<4>::identity()) {}
+
+    void set_camera_size(tiny_vec<2> size) {
+        auto zrange = 10.f;
+        proj_mat = tiny_matrix<4>::identity();
+        proj_mat[0][0] = 2.f / size.x;
+        proj_mat[1][1] = 2.f / size.y;
+        proj_mat[2][2] = - 2.f / zrange;
+    }
+
+    void set_camera_pos(tiny_vec<2> pos) {
+        view_mat = tiny_matrix<4>::identity();
+        view_mat[3][0] = -pos.x;
+        view_mat[3][1] = -pos.y;
+    }
+
+    void begin() {
+        screen.bind();
+        glClearColor(0, 0, 0, 1);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        glEnable(GL_DEPTH_TEST);
+        glDepthFunc(GL_LESS);
+    }
+
+    void finish() {
+        glDisable(GL_DEPTH_TEST);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glViewport(0, 0, engine->width(), engine->height());
+    
+        shader.use();
+        shader.set_uniform("MVP", tiny_matrix<4>::identity());
+        shader.set_uniform("TexCoordMat", tiny_matrix<3>::identity());
+        shader.set_uniform("DiffuseTex", 0);
+
+        screen.bind_texture(0);
+        screen_mesh.draw();
+    }
+
+    void draw_sprite(tiny_vec<2> pos, tiny_vec<2> size, float rot, tiny_texture& texture, tiny_vec<2> px_origin, tiny_vec<2> px_size) {
+        auto wh = tiny_vec<2>{float(texture.width()), float(texture.height())};
+        auto uv_origin = px_origin / wh;
+        auto uv_size = px_size / wh;
+
+        auto uv_mat = tiny_matrix<3>::identity();
+        uv_mat[0][0] = uv_size.x;
+        uv_mat[1][1] = uv_size.y;
+        uv_mat[2][0] = uv_origin.x;
+        uv_mat[2][1] = uv_origin.y;
+
+        auto sin = std::sin(rot);
+        auto cos = std::cos(rot);
+
+        auto model_mat = tiny_matrix<4>::identity();
+        model_mat[0][0] = size.x * cos;
+        model_mat[0][1] = size.x * sin;
+        model_mat[1][0] = size.y * -sin;
+        model_mat[1][1] = size.y * cos;
+        model_mat[3][0] = pos.x;
+        model_mat[3][1] = pos.y;
+
+        auto mvp = proj_mat * view_mat * model_mat;
+
+        shader.use();
+        shader.set_uniform("MVP", mvp);
+        shader.set_uniform("TexCoordMat", uv_mat);
+        shader.set_uniform("DiffuseTex", 0);
+
+        texture.bind(0);
+        sprite_mesh.draw();
+    }
+
+private:
+    tiny_engine* engine;
+    tiny_framebuffer screen;
+    tiny_shader shader;
+    tiny_mesh sprite_mesh;
+    tiny_mesh screen_mesh;
+    tiny_matrix<4> proj_mat;
+    tiny_matrix<4> view_mat;
 };

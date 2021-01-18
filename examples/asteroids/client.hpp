@@ -22,7 +22,7 @@ public:
     scene_gameplay(tiny_engine& e, client_context* ctx, const std::string& server_ip, int server_port) :
         engine(&e),
         client(ctx),
-        renderer(e),
+        renderer(e, 426, 240),
         sprites_texture("assets/sprites.png"),
         inputs{},
         inputs_changed(false),
@@ -33,8 +33,8 @@ public:
             auto addr = asio::ip::make_address(server_ip);
             client->connect({addr.is_v4() ? asio::ip::udp::v4() : asio::ip::udp::v6(), 0}, {addr, static_cast<unsigned short>(server_port)});
 
-            renderer.set_camera_size({800,600});
-            renderer.set_camera_pos({0,0});
+            renderer.set_camera_size({426, 240});
+            renderer.set_camera_pos({0, 0});
         }
 
     virtual void handle_event(tiny_engine& engine, const SDL_Event& event) override {
@@ -108,14 +108,18 @@ public:
     }
 
     virtual void draw(tiny_engine& engine) override {
+        renderer.begin();
+
         if (my_player) {
             //renderer.set_camera_pos(my_player->pos);
-            renderer.draw_sprite(my_player->pos, {32,32}, sprites_texture, {0,0}, {16, 16});
+            renderer.draw_sprite(my_player->pos, {16, 16}, my_player->dir / 32.f * tiny_tau<>, sprites_texture, {0,0}, {16, 16});
         }
 
         for (auto& [id, p] : other_players) {
-            renderer.draw_sprite(p.pos, {32,32}, sprites_texture, {16,0}, {16, 16});
+            renderer.draw_sprite(p.pos, {16,16}, p.dir / 32.f * tiny_tau<>, sprites_texture, {16,0}, {16, 16});
         }
+
+        renderer.finish();
     }
 
     void stop() {
@@ -163,6 +167,7 @@ private:
                 my_player = player_info{
                     m.id,
                     m.pos,
+                    m.dir,
                 };
                 other_players.erase(m.id);
             },
@@ -170,15 +175,18 @@ private:
                 for (const auto& p : m.players) {
                     if (my_player && p.id == my_player->id) {
                         my_player->pos = p.pos;
+                        my_player->dir = p.dir;
                     } else {
                         auto iter = other_players.find(p.id);
                         if (iter == other_players.end()) {
                             other_players.insert_or_assign(p.id, player_info{
                                 p.id,
                                 p.pos,
+                                p.dir,
                             });
                         } else {
                             iter->second.pos = p.pos;
+                            iter->second.dir = p.dir;
                         }
                     }
                 }
@@ -195,6 +203,7 @@ private:
     struct player_info {
         int id;
         tiny_vec<2> pos;
+        int dir;
     };
 
     bool inputs[4];
@@ -207,7 +216,7 @@ void run_client(asio::io_context& io, const std::string& server_ip, int server_p
     SDL_SetMainReady();
     SDL_Init(SDL_INIT_EVERYTHING);
 
-    auto engine = tiny_engine(io, "Asteroids");
+    auto engine = tiny_engine(io, "Asteroids", 854, 480);
 
     auto ctx = client_context(engine.get_io());
 

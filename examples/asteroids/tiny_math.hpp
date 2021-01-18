@@ -3,11 +3,14 @@
 #include <cassert>
 #include <cstdint>
 
+template <typename T = float>
+constexpr T tiny_tau = 6.283185307179586476925286766559;
+
 template <std::size_t N>
 struct tiny_vec;
 
 template <>
-struct alignas(16) tiny_vec<2> {
+struct tiny_vec<2> {
     float x = 0.f;
     float y = 0.f;
 
@@ -96,6 +99,26 @@ DECL_OP(*)
 DECL_OP(/)
 
 #undef DECL_OP
+
+template <std::size_t N>
+constexpr auto length(const tiny_vec<N>& vec) -> float {
+    auto acc = 0.f;
+    for (auto i = 0u; i < N; ++i) {
+        acc += vec[i] * vec[i];
+    }
+    return std::sqrt(acc);
+}
+
+template <std::size_t N>
+constexpr auto normalize(const tiny_vec<N>& vec) -> tiny_vec<N> {
+    return vec / length(vec);
+}
+
+constexpr auto rotate(const tiny_vec<2>& vec, float rad) -> tiny_vec<2> {
+    auto sin = std::sin(rad);
+    auto cos = std::cos(rad);
+    return {vec.x * cos - vec.y * sin, vec.x * sin + vec.y * cos};
+}
 
 template <std::size_t C, std::size_t R = C>
 struct tiny_matrix {

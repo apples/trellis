@@ -16,11 +16,13 @@ namespace message {
 struct player_init {
     int id;
     tiny_vec<2> pos;
+    int dir;
 
     template <typename Archive>
     void serialize(Archive& archive) {
         archive(id);
         archive(pos.x, pos.y);
+        archive(dir);
     }
 };
 
@@ -28,11 +30,13 @@ struct player_updates {
     struct pinfo {
         int id;
         tiny_vec<2> pos;
+        int dir;
 
         template <typename Archive>
         void serialize(Archive& archive) {
             archive(id);
             archive(pos.x, pos.y);
+            archive(dir);
         }
     };
 

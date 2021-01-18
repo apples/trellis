@@ -24,9 +24,14 @@ public:
     using timer_type = asio::steady_timer;
     using clock = timer_type::clock_type;
 
+    static constexpr float max_player_vel = 700.f;
+    static constexpr float player_accel = 2000.f;
+
     struct player_data {
         int id = 0;
         tiny_vec<2> pos = {0, 0};
+        tiny_vec<2> vel = {0, 0};
+        int dir = 0; // Range: 0-31
         bool inputs[static_cast<int>(input_keycode::NUM_INPUTS)] = {};
         connection_ptr::weak_type conn = {};
     };
@@ -45,7 +50,7 @@ public:
 
     void run() {
         std::cout << "Server running." << std::endl;
-        io->post([this]{ tick(); });
+        io->post([this]{ tick(1.f / 60.f); });
         io->post([this]{ log_stats(); });
         io->run();
     }
@@ -66,6 +71,8 @@ public:
             auto new_player = player_data{
                 next_player_id++,
                 {0, 0},
+                {0, 0},
+                0,
                 {},
                 conn,
             };
@@ -77,6 +84,7 @@ public:
             auto msg = message::player_init{
                 new_player.id,
                 new_player.pos,
+                new_player.dir,
             };
 
             send_message<channel::sync>(msg, *conn);
@@ -140,7 +148,7 @@ public:
     }
 
 private:
-    void tick() {
+    void tick(float delta) {
         auto start = clock::now();
 
         // Networking
@@ -149,17 +157,97 @@ private:
         // Physics
         {
             for (auto& [endpoint, player] : players) {
+                int x_axis = 0;
+                int y_axis = 0;
+
                 if (player.inputs[static_cast<int>(input_keycode::LEFT)]) {
-                    player.pos.x -= 1;
+                    x_axis -= 1;
                 }
                 if (player.inputs[static_cast<int>(input_keycode::RIGHT)]) {
-                    player.pos.x += 1;
+                    x_axis += 1;
                 }
                 if (player.inputs[static_cast<int>(input_keycode::DOWN)]) {
-                    player.pos.y -= 1;
+                    y_axis -= 1;
                 }
                 if (player.inputs[static_cast<int>(input_keycode::UP)]) {
-                    player.pos.y += 1;
+                    y_axis += 1;
+                }
+
+                int face_towards = -1;
+
+                if (y_axis < 0) {
+                    if (x_axis < 0) {
+                        face_towards = 20;
+                    } else if (x_axis > 0) {
+                        face_towards = 28;
+                    } else {
+                        face_towards = 24;
+                    }
+                } else if (y_axis > 0) {
+                    if (x_axis < 0) {
+                        face_towards = 12;
+                    } else if (x_axis > 0) {
+                        face_towards = 4;
+                    } else {
+                        face_towards = 8;
+                    }
+                } else {
+                    if (x_axis < 0) {
+                        face_towards = 16;
+                    } else if (x_axis > 0) {
+                        face_towards = 0;
+                    }
+                }
+
+                if (face_towards != -1) {
+                    int dist = face_towards - player.dir;
+
+                    if (dist != 0) {
+                        // turn towards desired direction
+
+                        if (std::abs(dist) > 16) {
+                            if (dist > 0) {
+                                dist = -32 + dist;
+                            } else {
+                                dist = 32 + dist;
+                            }
+                        }
+
+                        dist = dist / std::abs(dist);
+
+                        player.dir = (player.dir + dist) % 32;
+
+                        if (player.dir < 0 ) {
+                            player.dir += 32;
+                        }
+                    } else {
+                        // already facing desired direction, accelerate
+
+                        auto desired_vel = rotate(tiny_vec<2>{max_player_vel, 0}, float(player.dir) / 32.f * tiny_tau<float>);
+
+                        auto accel_needed = desired_vel - player.vel;
+
+                        if (length(accel_needed) > 0) {
+                            auto accel = normalize(accel_needed) * player_accel;
+
+                            player.vel = player.vel + accel * delta;
+                        }
+                    }
+                }
+
+                player.pos = player.pos + player.vel * delta;
+
+                if (player.pos.x < -222) {
+                    player.pos.x += 444;
+                }
+                if (player.pos.x > 222) {
+                    player.pos.x -= 444;
+                }
+                if (player.pos.y < -128) {
+                    player.pos.y += 256;
+                }
+                if (player.pos.y > 128) {
+                    player.pos.y -= 256;
                 }
             }
         }
@@ -174,6 +262,7 @@ private:
                     msg.players.push_back({
                         player.id,
                         player.pos,
+                        player.dir,
                     });
                     ++iter;
                 } else {
@@ -191,7 +280,7 @@ private:
         timer.expires_from_now(tick_rate);
         timer.async_wait([this](asio::error_code ec) {
             if (ec) return;
-            tick();
+            tick(1.f / 60.f);
         });
 
         auto stop = clock::now();
