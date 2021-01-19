@@ -11,11 +11,12 @@
 namespace trellis {
 
 /** Implements a time-delayed priority queue. */
-template <typename Value, typename Guard, typename Timer = guarded_timer<Guard>, typename Handler = std::function<void(const Value&)>>
+template <typename Value, typename Guard, typename Executor, typename Timer = guarded_timer<Guard>, typename Handler = std::function<void(const Value&)>>
 class retry_queue {
 public:
     using value_type = Value;
     using guard_type = Guard;
+    using executor_type = Executor;
     using timer_type = Timer;
     using callback_type = Handler;
     using clock = typename timer_type::clock_type;
@@ -23,9 +24,9 @@ public:
     using time_point = typename clock::time_point;
     using guard_ptr = std::weak_ptr<guard_type>;
 
-    retry_queue(asio::io_context& io, callback_type cb) :
+    retry_queue(asio::io_context& io, executor_type ex, callback_type cb) :
         queue(),
-        timer(io),
+        timer(ex),
         interval(std::chrono::milliseconds{50}),
         callback(std::move(cb)) {}
 
@@ -193,9 +194,7 @@ private:
         [[maybe_unused]] auto cancelled = timer.expires_at(queue.front().when);
         assert(cancelled <= 1);
 
-        auto exec = asio::get_associated_executor(callback);
-
-        timer.async_wait(guard, asio::bind_executor(exec, [this](asio::error_code ec, const guard_ptr& weak_guard) {
+        timer.async_wait(guard, [this](asio::error_code ec, const guard_ptr& weak_guard) {
             if (ec == asio::error::operation_aborted) {
                 return;
             }
@@ -227,7 +226,7 @@ private:
 
                 reset_timer(weak_guard);
             }
-        }));
+        });
     }
 
     std::vector<retry_entry> queue;

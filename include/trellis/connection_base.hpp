@@ -159,7 +159,7 @@ protected:
             send_raw(buffer, sizeof(type));
 
             handshake = handshake_state{
-                timer_type(context->get_io()),
+                timer_type(context->get_executor()),
                 buffer,
             };
         }
@@ -170,7 +170,7 @@ protected:
         // 200ms for now, should probably be dynamic in the future.
         handshake->timer.expires_from_now(std::chrono::milliseconds{200});
 
-        handshake->timer.async_wait(weak_from_this(), context->bind_executor([this](asio::error_code ec) {
+        handshake->timer.async_wait(weak_from_this(), [this](asio::error_code ec) {
             if (ec == asio::error::operation_aborted) {
                 return;
             }
@@ -185,7 +185,7 @@ protected:
             send_raw(handshake->buffer, sizeof(headers::type));
 
             send_connect();
-        }));
+        });
     }
 
     /**
@@ -258,7 +258,7 @@ protected:
             send_raw(buffer, size);
 
             handshake = handshake_state{
-                timer_type(context->get_io()),
+                timer_type(context->get_executor()),
                 buffer,
             };
         }
@@ -274,7 +274,7 @@ protected:
             handshake->timer.expires_from_now(std::chrono::milliseconds{0});
         }
 
-        handshake->timer.async_wait(weak_from_this(), context->bind_executor([this](asio::error_code ec) {
+        handshake->timer.async_wait(weak_from_this(), [this](asio::error_code ec) {
             if (ec == asio::error::operation_aborted) {
                 return;
             }
@@ -292,7 +292,7 @@ protected:
             send_raw(handshake->buffer, size);
 
             send_connect_ok();
-        }));
+        });
     }
 
     /**

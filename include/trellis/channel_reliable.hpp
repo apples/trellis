@@ -27,7 +27,7 @@ public:
         incoming_sequence_id(0),
         last_expected_sequence_id(0),
         assemblers(),
-        outgoing_queue(conn.get_context().get_io(), [this](const outgoing_entry& e){ send_outgoing(e); }) {}
+        outgoing_queue(conn.get_context().get_io(), conn.get_context().get_executor(), [this](const outgoing_entry& e){ send_outgoing(e); }) {}
 
     channel_reliable(const channel_reliable&) = delete;
     channel_reliable(channel_reliable&&) = delete;
@@ -163,7 +163,7 @@ protected:
     config::sequence_id_t incoming_sequence_id;
     config::sequence_id_t last_expected_sequence_id;
     assembler_map assemblers;
-    retry_queue<outgoing_entry, connection_base> outgoing_queue;
+    retry_queue<outgoing_entry, connection_base, context_base::executor_type> outgoing_queue;
 };
 
 } // namespace trellis

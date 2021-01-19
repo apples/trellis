@@ -26,7 +26,7 @@ public:
     using duration = underlying_timer_type::duration;
     using time_point = underlying_timer_type::time_point;
 
-    guarded_timer(asio::io_service& io) : timer(io) {}
+    guarded_timer(const asio::any_io_executor& ex) : timer(ex) {}
 
     auto expires_at(const time_point& expiry_time) {
         return timer.expires_at(expiry_time);
@@ -44,12 +44,10 @@ public:
     auto async_wait(const std::weak_ptr<guard_value>& guard, WaitHandler&& handler) {
         assert(guard.lock());
 
-        auto exec = asio::get_associated_executor(handler);
-
-        return timer.async_wait(asio::bind_executor(exec, [guard, handler = std::forward<WaitHandler>(handler)](asio::error_code ec) {
+        return timer.async_wait([guard, handler = std::forward<WaitHandler>(handler)](asio::error_code ec) {
             if (!guard.lock()) return;
             guarded_timer_invoke(handler, ec, guard);
-        }));
+        });
     }
 
 private:

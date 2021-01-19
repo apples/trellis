@@ -20,6 +20,8 @@ public:
 
     using protocol = asio::ip::udp;
 
+    using executor_type = asio::strand<asio::io_context::executor_type>;
+
     context_base(asio::io_context& io) :
         io(&io),
         strand(asio::make_strand(io)),
@@ -41,8 +43,12 @@ public:
     }
 
     template <typename F>
-    auto bind_executor(F&& f) {
+    auto bind_executor(F&& f) const {
         return asio::bind_executor(strand, std::forward<F>(f));
+    }
+
+    auto get_executor() -> const executor_type& {
+        return strand;
     }
 
     auto get_context_id() const -> std::uint16_t {
@@ -77,7 +83,7 @@ protected:
 
 private:
     asio::io_context* io;
-    asio::strand<asio::io_context::executor_type> strand;
+    executor_type strand;
     protocol::socket socket;
     datagram_buffer_cache cache;
     std::mt19937 rng;
