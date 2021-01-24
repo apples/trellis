@@ -74,12 +74,10 @@ int main() {
         std::cout << "Server received message " << message.number << std::endl;
         std::cout << "Server responding..." << std::endl;
 
-        auto ostream = trellis::opacketstream(*conn);
-        {
+        conn->send<channel_numbers>([&](auto& ostream) {
             auto archive = cereal::BinaryOutputArchive(ostream);
             archive(message);
-        }
-        ostream.send<channel_numbers>();
+        });
     });
 
     server.listen({asio::ip::make_address_v4("127.0.0.1"), 0});
@@ -97,15 +95,11 @@ int main() {
         std::cout << "Sending message_numbers..." << std::endl;
 
         for (auto n = 0; n < int(responses.size()); ++n) {
-            auto ostream = trellis::opacketstream(*conn);
-
-            {
+            conn->send<channel_numbers>([&](auto& ostream) {
                 auto archive = cereal::BinaryOutputArchive(ostream);
                 auto msg = message_numbers{n, important_message};
                 archive(msg);
-            }
-
-            ostream.send<channel_numbers>();
+            });
         }
     });
 

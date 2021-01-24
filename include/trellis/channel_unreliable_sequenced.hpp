@@ -18,7 +18,7 @@ public:
 
         if (!sequence_id_less(header.sequence_id, incoming_sequence_id)) {
             if (auto data = receive_impl(header, datagram, count)) {
-                on_receive_func(*data);
+                on_receive_func(std::move(*data));
 
                 assert(!sequence_id_less(header.sequence_id, incoming_sequence_id));
 

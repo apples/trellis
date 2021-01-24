@@ -119,10 +119,8 @@ using any = std::variant<
 template <typename Channel, typename Conn>
 void send_message(const message::any& msg, Conn& conn) {
     //std::cout << "Sending message (type:" << msg.index() << ") to " << conn.get_endpoint() << "." << std::endl;
-    auto ostream = trellis::opacketstream(conn);
-    {
+    conn.template send<Channel>([&](auto& ostream) {
         auto archive = cereal::BinaryOutputArchive(ostream);
         archive(msg);
-    }
-    ostream.template send<Channel>();
+    });
 }

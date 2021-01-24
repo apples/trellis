@@ -178,8 +178,8 @@ protected:
             // The only possible error is operation_aborted.
             assert(!ec);
 
-            // Should be in the CONNECTING state because if we received a CONNECT_OK then this timer should have been cancelled.
-            assert(state == connection_state::CONNECTING);
+            // If state is not CONNECTING, this was a spurious wakeup.
+            if (state != connection_state::CONNECTING) return;
 
             TRELLIS_LOG_ACTION("conn", connection_id, "Resending CONNECT due to timeout.");
             send_raw(handshake->buffer, sizeof(headers::type));
@@ -282,8 +282,8 @@ protected:
             // The only possible error is operation_aborted.
             assert(!ec);
 
-            // Should be in the CONNECTING state because if we received a CONNECT_OK then this timer should have been cancelled.
-            assert(state == connection_state::PENDING);
+            // If state is not PENDING, this was a spurious wakeup.
+            if (state != connection_state::PENDING) return;
 
             constexpr auto size = sizeof(headers::type) + sizeof(headers::connect_ok);
 

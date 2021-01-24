@@ -7,6 +7,7 @@
 #include "logging.hpp"
 #include "message_header.hpp"
 #include "utility.hpp"
+#include "streams.hpp"
 
 #include <asio.hpp>
 
@@ -21,6 +22,7 @@ template <typename Context>
 class connection final : public connection_base {
 public:
     friend Context;
+    friend packetbuf<connection>;
 
     using context_type = Context;
     using traits = context_traits<context_type>;
@@ -34,6 +36,27 @@ public:
 
     connection(const connection&) = delete;
     connection(connection&&) = delete;
+
+    auto get_stats() const -> std::array<connection_stats, traits::channel_count> {
+        return get_stats(std::make_index_sequence<traits::channel_count>{});
+    }
+
+    template <typename Channel, typename F>
+    void send(F&& func) {
+        auto stream = opacketstream<Channel, connection>(*this);
+        std::forward<F>(func)(stream);
+    }
+
+private:
+    // Exposed as provate members so Context can access them.
+    using connection_base::send_raw;
+    using connection_base::send_connect;
+    using connection_base::receive_connect_ok;
+    using connection_base::send_connect_ok;
+    using connection_base::receive_connect_ack;
+    using connection_base::cancel_handshake;
+    using connection_base::disconnect_without_send;
+    using connection_base::send_ack;
 
     /** Sends all data packets in the given iterator range. Generates data headers and writes them to the front of the buffers. */
     template <typename Channel, typename Iter>
@@ -72,21 +95,6 @@ public:
             }
         }
     }
-
-    auto get_stats() const -> std::array<connection_stats, traits::channel_count> {
-        return get_stats(std::make_index_sequence<traits::channel_count>{});
-    }
-
-private:
-    // Exposed as provate members so Context can access them.
-    using connection_base::send_raw;
-    using connection_base::send_connect;
-    using connection_base::receive_connect_ok;
-    using connection_base::send_connect_ok;
-    using connection_base::receive_connect_ack;
-    using connection_base::cancel_handshake;
-    using connection_base::disconnect_without_send;
-    using connection_base::send_ack;
 
     /**
      * Receives a DATA datagram, and if it completes the message, calls data_handler with the results.

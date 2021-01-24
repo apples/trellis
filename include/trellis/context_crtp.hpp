@@ -46,6 +46,10 @@ public:
         }
     }
 
+    bool is_running() const {
+        return running;
+    }
+
     template <typename Handler>
     void poll_events(Handler&& handler) {
         // must be executed from user thread

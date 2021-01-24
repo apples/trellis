@@ -15,7 +15,7 @@ public:
         assert(conn->get_context().is_thread_current());
 
         if (auto data = receive_impl(header, datagram, count)) {
-            on_receive_func(*data);
+            on_receive_func(std::move(*data));
         }
     }
 };

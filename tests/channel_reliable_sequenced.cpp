@@ -1,5 +1,7 @@
 #include "catch.hpp"
 
+#include "context_handler.hpp"
+
 #include <asio.hpp>
 #include <trellis/trellis.hpp>
 #include <trellis/proxy_context.hpp>
@@ -24,30 +26,41 @@ TEST_CASE("Reliable sequenced channel works under perfect conditions", "[channel
         REQUIRE(ec == asio::error::operation_aborted);
         server.stop();
         client.stop();
+        io.stop();
     });
 
-    server.on_connect([&](auto& server, const auto& conn_ptr) {
-        for (int i = 0; i < COUNT; ++i) {
-            auto ostream = trellis::opacketstream(*conn_ptr);
-
-            ostream.write(reinterpret_cast<const char*>(&i), sizeof(i));
-
-            ostream.template send<channel_A>();
-        }
-    });
+    auto server_handler = context_handler{
+        server,
+        [&](const auto& conn_ptr) {
+            for (int i = 0; i < COUNT; ++i) {
+                conn_ptr->template send<channel_A>([&](std::ostream& ostream) {
+                    ostream.write(reinterpret_cast<const char*>(&i), sizeof(i));
+                });
+            }
+        },
+        [&](const auto& conn, asio::error_code ec) {},
+        [&](channel_A, const auto& conn, std::istream& packet) {},
+    };
 
     auto recvd = std::vector<int>{};
     recvd.reserve(COUNT);
 
-    client.on_receive<channel_A>([&](auto& client, const auto& conn_ptr, std::istream& packet) {
-        int i;
-        packet.read(reinterpret_cast<char*>(&i), sizeof(i));
-        recvd.push_back(i);
-        if (i == COUNT - 1) {
-            REQUIRE(timeout.cancel() == 1);
-        }
-    });
+    auto client_handler = context_handler{
+        client,
+        [&](const auto& conn_ptr) {},
+        [&](const auto& conn, asio::error_code ec) {},
+        [&](channel_A, const auto& conn, std::istream& packet) {
+            int i;
+            packet.read(reinterpret_cast<char*>(&i), sizeof(i));
+            recvd.push_back(i);
+            if (i == COUNT - 1) {
+                REQUIRE(timeout.cancel() == 1);
+            }
+        },
+    };
 
+    server_handler.poll();
+    client_handler.poll();
     io.run();
 
     REQUIRE(std::is_sorted(recvd.begin(), recvd.end()));
@@ -76,30 +89,41 @@ TEST_CASE("Reliable sequenced channel works under unstable conditions", "[channe
         server.stop();
         client.stop();
         proxy.stop();
+        io.stop();
     });
 
-    server.on_connect([&](auto& server, const auto& conn_ptr) {
-        for (int i = 0; i < COUNT; ++i) {
-            auto ostream = trellis::opacketstream(*conn_ptr);
-
-            ostream.write(reinterpret_cast<const char*>(&i), sizeof(i));
-
-            ostream.template send<channel_A>();
-        }
-    });
+    auto server_handler = context_handler{
+        server,
+        [&](const auto& conn_ptr) {
+            for (int i = 0; i < COUNT; ++i) {
+                conn_ptr->template send<channel_A>([&](std::ostream& ostream) {
+                    ostream.write(reinterpret_cast<const char*>(&i), sizeof(i));
+                });
+            }
+        },
+        [&](const auto& conn, asio::error_code ec) {},
+        [&](channel_A, const auto& conn, std::istream& packet) {},
+    };
 
     auto recvd = std::vector<int>{};
     recvd.reserve(COUNT);
 
-    client.on_receive<channel_A>([&](auto& client, const auto& conn_ptr, std::istream& packet) {
-        int i;
-        packet.read(reinterpret_cast<char*>(&i), sizeof(i));
-        recvd.push_back(i);
-        if (i == COUNT - 1) {
-            REQUIRE(timeout.cancel() == 1);
-        }
-    });
+    auto client_handler = context_handler{
+        client,
+        [&](const auto& conn_ptr) {},
+        [&](const auto& conn, asio::error_code ec) {},
+        [&](channel_A, const auto& conn, std::istream& packet) {
+            int i;
+            packet.read(reinterpret_cast<char*>(&i), sizeof(i));
+            recvd.push_back(i);
+            if (i == COUNT - 1) {
+                REQUIRE(timeout.cancel() == 1);
+            }
+        },
+    };
 
+    server_handler.poll();
+    client_handler.poll();
     io.run();
 
     REQUIRE(std::is_sorted(recvd.begin(), recvd.end()));

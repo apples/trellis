@@ -37,6 +37,7 @@ target_compile_features(trellis INTERFACE cxx_std_20)
 add_executable(trellis_tests
     tests/catch.cpp
     tests/catch.hpp
+    tests/context_handler.hpp
     tests/channel_unreliable_unordered.cpp
     tests/channel_unreliable_sequenced.cpp
     tests/channel_reliable_ordered.cpp

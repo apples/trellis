@@ -68,6 +68,7 @@ public:
 
             if (node) {
                 _free_list = node->next;
+                node->next = nullptr;
             } else {
                 node = new list_node{};
             }

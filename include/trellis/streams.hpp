@@ -54,6 +54,11 @@ public:
         current_fragment(fragments.begin()),
         max_pos(0) {}
 
+    packetbuf(const packetbuf&) = delete;
+    packetbuf(packetbuf&&) = delete;
+    packetbuf& operator=(const packetbuf&) = delete;
+    packetbuf& operator=(packetbuf&&) = delete;
+
     virtual int_type overflow(int_type ch) {
         if (!traits_type::eq_int_type(ch, traits_type::eof())) {
             if (current_fragment == fragments_back || ++current_fragment == fragments_back) {
@@ -175,17 +180,17 @@ private:
     pos_type max_pos;
 };
 
-template <typename C>
+template <typename Channel, typename C>
 class opacketstream : public std::ostream {
 public:
+    using channel_type = Channel;
     using connection_type = C;
     using buf_type = packetbuf<connection_type>;
 
     opacketstream(connection_type& conn) : std::ostream(&buf), buf(conn) {}
 
-    template <typename Channel>
-    void send() {
-        buf.template send<Channel>();
+    ~opacketstream() {
+        buf.template send<channel_type>();
     }
 
 private:
