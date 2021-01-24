@@ -40,11 +40,28 @@ struct player_updates {
         }
     };
 
+    struct binfo {
+        int id;
+        int player_id;
+        tiny_vec<2> pos;
+        int dir;
+
+        template <typename Archive>
+        void serialize(Archive& archive) {
+            archive(id);
+            archive(player_id);
+            archive(pos.x, pos.y);
+            archive(dir);
+        }
+    };
+
     std::vector<pinfo> players;
+    std::vector<binfo> bullets;
 
     template <typename Archive>
     void serialize(Archive& archive) {
         archive(players);
+        archive(bullets);
     }
 };
 
@@ -57,16 +74,51 @@ struct player_input {
     }
 };
 
+struct remove_player {
+    int id;
+
+    template <typename Archive>
+    void serialize(Archive& archive) {
+        archive(id);
+    }
+};
+
+struct remove_bullet {
+    int id;
+
+    template <typename Archive>
+    void serialize(Archive& archive) {
+        archive(id);
+    }
+};
+
+struct player_shoot {
+    int player_id;
+    tiny_vec<2> pos;
+    int dir;
+
+    template <typename Archive>
+    void serialize(Archive& archive) {
+        archive(player_id);
+        archive(pos.x, pos.y);
+        archive(dir);
+    }
+};
+
 using any = std::variant<
     std::monostate,
     player_init,
     player_updates,
-    player_input>;
+    player_input,
+    remove_player,
+    remove_bullet,
+    player_shoot>;
 
 } // namespace message
 
 template <typename Channel, typename Conn>
 void send_message(const message::any& msg, Conn& conn) {
+    //std::cout << "Sending message (type:" << msg.index() << ") to " << conn.get_endpoint() << "." << std::endl;
     auto ostream = trellis::opacketstream(conn);
     {
         auto archive = cereal::BinaryOutputArchive(ostream);

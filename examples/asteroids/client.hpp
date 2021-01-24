@@ -12,6 +12,7 @@
 
 #include <cstddef>
 #include <memory>
+#include <unordered_map>
 
 using client_context = channel::apply_channels<trellis::client_context>;
 using connection_type = client_context::connection_type;
@@ -27,7 +28,8 @@ public:
         inputs{},
         inputs_changed(false),
         my_player{},
-        other_players{} {
+        other_players{},
+        bullets{} {
             std::cout << "Client connecting to [" << server_ip << "]:" << server_port << std::endl;
 
             auto addr = asio::ip::make_address(server_ip);
@@ -57,6 +59,17 @@ public:
                         case SDL_Scancode::SDL_SCANCODE_DOWN:
                             inputs_changed = true;
                             inputs[static_cast<int>(input_keycode::DOWN)] = true;
+                            break;
+                        case SDL_Scancode::SDL_SCANCODE_SPACE:
+                            if (my_player) {
+                                if (auto conn = wconn.lock()) {
+                                    send_message<channel::reliable_messages>(message::player_shoot{
+                                        my_player->id,
+                                        my_player->pos,
+                                        my_player->dir,
+                                    }, *conn);
+                                }
+                            }
                             break;
                         default:
                             break;
@@ -119,6 +132,14 @@ public:
             renderer.draw_sprite(p.pos, {16,16}, p.dir / 32.f * tiny_tau<>, sprites_texture, {16,0}, {16, 16});
         }
 
+        for (auto& [id, b] : bullets) {
+            if (my_player && b.player_id == my_player->id) {
+                renderer.draw_sprite(b.pos, {8,8}, b.dir / 32.f * tiny_tau<>, sprites_texture, {32,0}, {8, 8});
+            } else {
+                renderer.draw_sprite(b.pos, {8,8}, b.dir / 32.f * tiny_tau<>, sprites_texture, {40,0}, {8, 8});
+            }
+        }
+
         renderer.finish();
     }
 
@@ -149,6 +170,10 @@ public:
         on_receive(conn, istream);
     }
 
+    void on_receive(channel::reliable_messages, const connection_ptr& conn, std::istream& istream) {
+        on_receive(conn, istream);
+    }
+
 private:
     void on_receive(const connection_ptr& conn, std::istream& istream) {
         message::any msg;
@@ -159,6 +184,7 @@ private:
         std::visit(overload {
             [](std::monostate) {},
             [&](const auto&) {
+                std::cout << "Bad server!" << std::endl;
                 conn->disconnect();
             },
             [&](const message::player_init& m) {
@@ -190,6 +216,40 @@ private:
                         }
                     }
                 }
+                for (const auto& b : m.bullets) {
+                    auto iter = bullets.find(b.id);
+                    if (iter == bullets.end()) {
+                        bullets.insert_or_assign(b.id, bullet_info{
+                            b.id,
+                            b.player_id,
+                            b.pos,
+                            b.dir,
+                        });
+                    } else {
+                        iter->second.pos = b.pos;
+                        iter->second.dir = b.dir;
+                    }
+                }
+            },
+            [&](const message::remove_player& rm) {
+                if (my_player && my_player->id == rm.id) {
+                    std::cout << "Removing self AAAAAAAAAAAH!!!" << std::endl;
+                    my_player = std::nullopt;
+                } else {
+                    auto iter = other_players.find(rm.id);
+                    if (iter != other_players.end()) {
+                        std::cout << "Removing player " << rm.id << std::endl;
+                        other_players.erase(iter);
+                    } else {
+                        std::cout << "Failed to remove ghost " << rm.id << std::endl;
+                    }
+                }
+            },
+            [&](const message::remove_bullet& rm) {
+                auto iter = bullets.find(rm.id);
+                if (iter != bullets.end()) {
+                    bullets.erase(iter);
+                }
             },
         }, msg);
     }
@@ -206,10 +266,18 @@ private:
         int dir;
     };
 
+    struct bullet_info {
+        int id;
+        int player_id;
+        tiny_vec<2> pos;
+        int dir;
+    };
+
     bool inputs[4];
     bool inputs_changed;
     std::optional<player_info> my_player;
     std::unordered_map<int, player_info> other_players;
+    std::unordered_map<int, bullet_info> bullets;
 };
 
 void run_client(asio::io_context& io, const std::string& server_ip, int server_port) {

@@ -26,14 +26,27 @@ public:
 
     static constexpr float max_player_vel = 700.f;
     static constexpr float player_accel = 2000.f;
+    static constexpr float bullet_vel = 320.f;
+    static constexpr float max_bullet_age = 0.7f;
 
-    struct player_data {
-        int id = 0;
+    struct physics_body {
         tiny_vec<2> pos = {0, 0};
         tiny_vec<2> vel = {0, 0};
         int dir = 0; // Range: 0-31
+    };
+
+    struct player_data {
+        int id = 0;
         bool inputs[static_cast<int>(input_keycode::NUM_INPUTS)] = {};
         connection_ptr::weak_type conn = {};
+        physics_body* body = nullptr;
+    };
+
+    struct bullet_data {
+        int id = 0;
+        int player_id = 0;
+        float age = 0;
+        physics_body* body = nullptr;
     };
 
     server_engine(asio::io_context& io, int port) :
@@ -43,7 +56,10 @@ public:
         timer(io),
         log_timer(io),
         players(),
-        next_player_id(0) {
+        next_player_id(0),
+        bullets(),
+        next_bullet_id(0),
+        physics_bodies() {
             server.listen({asio::ip::udp::v6(), static_cast<unsigned short>(port)});
             std::cout << "Server listening." << std::endl;
         }
@@ -68,13 +84,17 @@ public:
             std::cout << "Player " << iter->second.id << " attempted to connect twice." << std::endl;
             conn->disconnect();
         } else {
-            auto new_player = player_data{
-                next_player_id++,
+            physics_bodies.push_back(std::make_unique<physics_body>(physics_body{
                 {0, 0},
                 {0, 0},
                 0,
+            }));
+
+            auto new_player = player_data{
+                next_player_id++,
                 {},
                 conn,
+                physics_bodies.back().get(),
             };
 
             std::cout << "New player: " << new_player.id << std::endl;
@@ -83,8 +103,8 @@ public:
 
             auto msg = message::player_init{
                 new_player.id,
-                new_player.pos,
-                new_player.dir,
+                new_player.body->pos,
+                new_player.body->dir,
             };
 
             send_message<channel::sync>(msg, *conn);
@@ -95,6 +115,13 @@ public:
         auto iter = players.find(conn->get_endpoint());
         if (iter != players.end()) {
             std::cout << "Player " << iter->second.id << " disconnected: ";
+            auto msg = message::remove_player{iter->second.id};
+            players.erase(iter);
+            for (auto& [endpoint, player] : players) {
+                if (auto pconn = player.conn.lock()) {
+                    send_message<channel::reliable_messages>(msg, *pconn);
+                }
+            }
         } else {
             std::cout << "Ghost disconnected: ";
         }
@@ -147,6 +174,41 @@ public:
         }
     }
 
+    void on_receive(channel::reliable_messages, const connection_ptr& conn, std::istream& istream) {
+        message::any msg;
+        {
+            auto archive = cereal::BinaryInputArchive(istream);
+            archive(msg);
+        }
+
+        auto iter = players.find(conn->get_endpoint());
+        if (iter == players.end()) {
+            conn->disconnect();
+        } else {
+            std::visit(overload {
+                [&](const auto&) {
+                    conn->disconnect();
+                },
+                [&](const message::player_shoot& s) {
+                    physics_bodies.push_back(std::make_unique<physics_body>(physics_body{
+                        s.pos,
+                        rotate(tiny_vec<2>{bullet_vel, 0}, float(s.dir) / 32.f * tiny_tau<>),
+                        s.dir,
+                    }));
+
+                    auto new_bullet = bullet_data{
+                        next_bullet_id++,
+                        s.player_id,
+                        0,
+                        physics_bodies.back().get(),
+                    };
+
+                    bullets.emplace_back(new_bullet);
+                },
+            }, msg);
+        }
+    }
+
 private:
     void tick(float delta) {
         auto start = clock::now();
@@ -154,100 +216,122 @@ private:
         // Networking
         server.poll_events(*this);
 
-        // Physics
+        // Bullets
         {
+            for (auto& bullet : bullets) {
+                bullet.age += delta;
+            }
+
+            auto split = std::partition(bullets.begin(), bullets.end(), [](auto& b){ return b.age < max_bullet_age; });
+            
             for (auto& [endpoint, player] : players) {
-                int x_axis = 0;
-                int y_axis = 0;
-
-                if (player.inputs[static_cast<int>(input_keycode::LEFT)]) {
-                    x_axis -= 1;
-                }
-                if (player.inputs[static_cast<int>(input_keycode::RIGHT)]) {
-                    x_axis += 1;
-                }
-                if (player.inputs[static_cast<int>(input_keycode::DOWN)]) {
-                    y_axis -= 1;
-                }
-                if (player.inputs[static_cast<int>(input_keycode::UP)]) {
-                    y_axis += 1;
-                }
-
-                int face_towards = -1;
-
-                if (y_axis < 0) {
-                    if (x_axis < 0) {
-                        face_towards = 20;
-                    } else if (x_axis > 0) {
-                        face_towards = 28;
-                    } else {
-                        face_towards = 24;
+                if (auto conn = player.conn.lock()) {
+                    for (auto iter = split; iter != bullets.end(); ++iter) {
+                        send_message<channel::reliable_messages>(message::remove_bullet{iter->id}, *conn);
                     }
-                } else if (y_axis > 0) {
-                    if (x_axis < 0) {
-                        face_towards = 12;
-                    } else if (x_axis > 0) {
-                        face_towards = 4;
-                    } else {
-                        face_towards = 8;
+                }
+            }
+
+            bullets.erase(split, bullets.end());
+        }
+
+        // Player input
+        for (auto& [endpoint, player] : players) {
+            int x_axis = 0;
+            int y_axis = 0;
+
+            if (player.inputs[static_cast<int>(input_keycode::LEFT)]) {
+                x_axis -= 1;
+            }
+            if (player.inputs[static_cast<int>(input_keycode::RIGHT)]) {
+                x_axis += 1;
+            }
+            if (player.inputs[static_cast<int>(input_keycode::DOWN)]) {
+                y_axis -= 1;
+            }
+            if (player.inputs[static_cast<int>(input_keycode::UP)]) {
+                y_axis += 1;
+            }
+
+            int face_towards = -1;
+
+            if (y_axis < 0) {
+                if (x_axis < 0) {
+                    face_towards = 20;
+                } else if (x_axis > 0) {
+                    face_towards = 28;
+                } else {
+                    face_towards = 24;
+                }
+            } else if (y_axis > 0) {
+                if (x_axis < 0) {
+                    face_towards = 12;
+                } else if (x_axis > 0) {
+                    face_towards = 4;
+                } else {
+                    face_towards = 8;
+                }
+            } else {
+                if (x_axis < 0) {
+                    face_towards = 16;
+                } else if (x_axis > 0) {
+                    face_towards = 0;
+                }
+            }
+
+            if (face_towards != -1) {
+                int dist = face_towards - player.body->dir;
+
+                if (dist != 0) {
+                    // turn towards desired direction
+
+                    if (std::abs(dist) > 16) {
+                        if (dist > 0) {
+                            dist = -32 + dist;
+                        } else {
+                            dist = 32 + dist;
+                        }
+                    }
+
+                    dist = dist / std::abs(dist);
+
+                    player.body->dir = (player.body->dir + dist) % 32;
+
+                    if (player.body->dir < 0 ) {
+                        player.body->dir += 32;
                     }
                 } else {
-                    if (x_axis < 0) {
-                        face_towards = 16;
-                    } else if (x_axis > 0) {
-                        face_towards = 0;
+                    // already facing desired direction, accelerate
+
+                    auto desired_vel = rotate(tiny_vec<2>{max_player_vel, 0}, float(player.body->dir) / 32.f * tiny_tau<float>);
+
+                    auto accel_needed = desired_vel - player.body->vel;
+
+                    if (length(accel_needed) > 0) {
+                        auto accel = normalize(accel_needed) * player_accel;
+
+                        player.body->vel = player.body->vel + accel * delta;
                     }
                 }
+            }
+        }
 
-                if (face_towards != -1) {
-                    int dist = face_towards - player.dir;
+        // Physics
+        {
+            for (auto& body : physics_bodies) {
+                body->pos = body->pos + body->vel * delta;
 
-                    if (dist != 0) {
-                        // turn towards desired direction
-
-                        if (std::abs(dist) > 16) {
-                            if (dist > 0) {
-                                dist = -32 + dist;
-                            } else {
-                                dist = 32 + dist;
-                            }
-                        }
-
-                        dist = dist / std::abs(dist);
-
-                        player.dir = (player.dir + dist) % 32;
-
-                        if (player.dir < 0 ) {
-                            player.dir += 32;
-                        }
-                    } else {
-                        // already facing desired direction, accelerate
-
-                        auto desired_vel = rotate(tiny_vec<2>{max_player_vel, 0}, float(player.dir) / 32.f * tiny_tau<float>);
-
-                        auto accel_needed = desired_vel - player.vel;
-
-                        if (length(accel_needed) > 0) {
-                            auto accel = normalize(accel_needed) * player_accel;
-
-                            player.vel = player.vel + accel * delta;
-                        }
-                    }
+                if (body->pos.x < -222) {
+                    body->pos.x += 444;
                 }
-
-                player.pos = player.pos + player.vel * delta;
-
-                if (player.pos.x < -222) {
-                    player.pos.x += 444;
+                if (body->pos.x > 222) {
+                    body->pos.x -= 444;
                 }
-                if (player.pos.x > 222) {
-                    player.pos.x -= 444;
+                if (body->pos.y < -128) {
+                    body->pos.y += 256;
                 }
-                if (player.pos.y < -128) {
-                    player.pos.y += 256;
-                }
-                if (player.pos.y > 128) {
-                    player.pos.y -= 256;
+                if (body->pos.y > 128) {
+                    body->pos.y -= 256;
                 }
             }
         }
@@ -261,13 +345,22 @@ private:
                 if (auto conn = player.conn.lock()) {
                     msg.players.push_back({
                         player.id,
-                        player.pos,
-                        player.dir,
+                        player.body->pos,
+                        player.body->dir,
                     });
                     ++iter;
                 } else {
                     iter = players.erase(iter);
                 }
+            }
+
+            for (auto& bullet : bullets) {
+                msg.bullets.push_back({
+                    bullet.id,
+                    bullet.player_id,
+                    bullet.body->pos,
+                    bullet.body->dir,
+                });
             }
 
             for (auto& [endpoint, player] : players) {
@@ -323,6 +416,9 @@ private:
     std::map<endpoint_type, player_data> players;
     int next_player_id;
     std::vector<clock::duration> frame_times;
+    std::vector<bullet_data> bullets;
+    int next_bullet_id;
+    std::vector<std::unique_ptr<physics_body>> physics_bodies;
 };
 
 void run_server(asio::io_context& io, int port) {
