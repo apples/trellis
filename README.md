@@ -6,6 +6,8 @@ It is currently experimental, incomplete, and unstable.
 
 ## Documentation
 
+High-level documentation is available at [https://trellis.readthedocs.io/en/latest/](https://trellis.readthedocs.io/en/latest/).
+
 The public API is documented with Doxygen comments, which can be converted to HTML using the included `Doxyfile`.
 
 ## Features
