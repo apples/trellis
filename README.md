@@ -2,7 +2,11 @@
 
 Trellis is a connection-oriented UDP networking framework designed primarily for games.
 
-It is currently experimental, incomplete, and unstable.
+It is easy to use and beginner-friendly. Basic knowledge of networking and threads is assumed.
+
+It is currently only intended for experimental purposes, but the API should be fairly stable.
+
+High performance is not a goal, and neither is handling weird network conditions. This is mostly just for fun.
 
 ## Documentation
 
