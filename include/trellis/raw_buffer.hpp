@@ -3,11 +3,11 @@
 #include <cstdint>
 #include <memory>
 
-namespace trellis {
+namespace trellis::_detail {
 
 struct raw_buffer {
     std::unique_ptr<char[]> data;
     std::size_t data_len;
 };
 
-} // namespace trellis
+} // namespace trellis::_detail

@@ -34,10 +34,12 @@ public:
 
     using base_type::get_context_id;
 
+    /** Constructs a context from the given io_context. */
     server_context(asio::io_context& io) :
         base_type(io),
         active_connections() {}
 
+    /** Opens the server socket to listen for incoming client connections. Both the server and the clients must have matching channel lists. */
     void listen(const typename protocol::endpoint& endpoint) {
         // must be executed from user thread
         assert(!this->is_thread_current());
@@ -45,22 +47,9 @@ public:
         this->open(endpoint);
     }
 
+    /** Gets the server's local endpoint. */
     auto get_endpoint() const -> typename protocol::endpoint {
         return this->get_socket().local_endpoint();
-    }
-
-    void disconnect_all() {
-        if (active_connections.empty()) {
-            this->close();
-        } else {
-            for (auto& [endpoint, conn] : active_connections) {
-                conn->disconnect([this] {
-                    if (active_connections.size() == 0) {
-                        this->close();
-                    }
-                });
-            }
-        }
     }
 
 protected:
@@ -84,6 +73,21 @@ protected:
     }
 
 private:
+    /** Disconnects all client connections and closes the socket. */
+    void disconnect_all() {
+        if (active_connections.empty()) {
+            this->close();
+        } else {
+            for (auto& [endpoint, conn] : active_connections) {
+                conn->disconnect([this] {
+                    if (active_connections.size() == 0) {
+                        this->close();
+                    }
+                });
+            }
+        }
+    }
+
     void kill_iter(typename connection_map::iterator iter, const asio::error_code& ec) {
         // should only be called from kill(conn) and the receive handler, so we should be in the networking thread
         assert(this->is_thread_current());
@@ -93,25 +97,25 @@ private:
 
         TRELLIS_LOG_ACTION("server", get_context_id(), "Killing connection ", iter->second->get_endpoint());
 
-        this->push_event(event_disconnect{iter->second, ec});
+        this->push_event(_detail::event_disconnect{iter->second, ec});
 
         active_connections.erase(iter);
     }
 
-    void receive(const datagram_buffer& buffer, const typename protocol::endpoint& sender_endpoint, std::size_t size) {
+    void receive(const _detail::datagram_buffer& buffer, const typename protocol::endpoint& sender_endpoint, std::size_t size) {
         TRELLIS_BEGIN_SECTION("server");
 
         // should only be called from the base receive handler, so we should be in the networking thread
         assert(this->is_thread_current());
 
-        auto type = headers::type{};
+        auto type = _detail::headers::type{};
 
-        std::memcpy(&type, buffer.data.data(), sizeof(headers::type));
+        std::memcpy(&type, buffer.data.data(), sizeof(_detail::headers::type));
 
         auto iter = active_connections.find(sender_endpoint);
 
         switch (type) {
-            case headers::type::CONNECT: {
+            case _detail::headers::type::CONNECT: {
                 if (iter == active_connections.end()) {
                     TRELLIS_LOG_ACTION("server", get_context_id(), "Received CONNECT for unknown connection. Creating connection.");
 
@@ -138,7 +142,7 @@ private:
                 }
                 break;
             }
-            case headers::type::CONNECT_OK: {
+            case _detail::headers::type::CONNECT_OK: {
                 if (iter != active_connections.end()) {
                     TRELLIS_LOG_ACTION("server", get_context_id(), "Unexpected CONNECT_OK from client ", sender_endpoint, ". Disconnecting.");
 
@@ -148,20 +152,20 @@ private:
                 }
                 break;
             }
-            case headers::type::CONNECT_ACK: {
+            case _detail::headers::type::CONNECT_ACK: {
                 if (iter != active_connections.end()) {
                     TRELLIS_LOG_ACTION("server", get_context_id(), "CONNECT_ACK from client ", sender_endpoint, ".");
 
                     iter->second->receive_connect_ack([this, &iter] {
                         TRELLIS_LOG_ACTION("server", get_context_id(), "CONNECT_ACK caused connection to become ESTABLISHED. Pushing event_connect.");
-                        this->push_event(event_connect{iter->second});
+                        this->push_event(_detail::event_connect{iter->second});
                     });
                 } else {
                     TRELLIS_LOG_ACTION("server", get_context_id(), "Unexpected CONNECT_ACK from unknown client ", sender_endpoint);
                 }
                 break;
             }
-            case headers::type::DISCONNECT: {
+            case _detail::headers::type::DISCONNECT: {
                 if (iter != active_connections.end()) {
                     TRELLIS_LOG_ACTION("server", get_context_id(), "DISCONNECT from client ", sender_endpoint, ". Killing connection.");
 
@@ -171,13 +175,13 @@ private:
                 }
                 break;
             }
-            case headers::type::DATA: {
+            case _detail::headers::type::DATA: {
                 if (iter != active_connections.end()) {
                     auto& conn = iter->second;
 
                     if (conn->get_state() == connection_state::PENDING || conn->get_state() == connection_state::ESTABLISHED) {
-                        auto header = headers::data{};
-                        std::memcpy(&header, buffer.data.data() + sizeof(headers::type), sizeof(headers::data));
+                        auto header = _detail::headers::data{};
+                        std::memcpy(&header, buffer.data.data() + sizeof(_detail::headers::type), sizeof(_detail::headers::data));
 
                         if (header.channel_id >= sizeof...(Channels)) {
                             TRELLIS_LOG_ACTION("server", get_context_id(), "DATA received with invalid channel_id. Disconnecting.");
@@ -188,11 +192,11 @@ private:
 
                         TRELLIS_LOG_FRAGMENT("server", +header.fragment_id, +header.fragment_count);
 
-                        conn->receive(header, buffer, size, [&](raw_buffer&& data) {
-                            this->push_event(event_receive{conn, header.channel_id, std::move(data)});
+                        conn->receive(header, buffer, size, [&](_detail::raw_buffer&& data) {
+                            this->push_event(_detail::event_receive{conn, header.channel_id, std::move(data)});
                         }, [&] {
                             TRELLIS_LOG_ACTION("server", get_context_id(), "DATA caused connection to become ESTABLISHED. Pushing event_connect.");
-                            this->push_event(event_connect{iter->second});
+                            this->push_event(_detail::event_connect{iter->second});
                         });
                     } else {
                         TRELLIS_LOG_ACTION("server", get_context_id(), "Unexpected DATA from client ", sender_endpoint, ", which has not completed the handshake. Disconnecting.");
@@ -205,13 +209,13 @@ private:
 
                 break;
             }
-            case headers::type::DATA_ACK: {
+            case _detail::headers::type::DATA_ACK: {
                 if (iter != active_connections.end()) {
                     auto& conn = iter->second;
 
                     if (conn->get_state() == connection_state::ESTABLISHED) {
-                        auto header = headers::data_ack{};
-                        std::memcpy(&header, buffer.data.data() + sizeof(headers::type), sizeof(headers::data_ack));
+                        auto header = _detail::headers::data_ack{};
+                        std::memcpy(&header, buffer.data.data() + sizeof(_detail::headers::type), sizeof(_detail::headers::data_ack));
 
                         TRELLIS_LOG_FRAGMENT("server", +header.fragment_id, "?");
 

@@ -17,33 +17,38 @@
 
 namespace trellis {
 
-/** Context-specific connection type. Handles sending and receiving data packets. */
+/** Context-specific connection type. Allows sending data. */
 template <typename Context>
 class connection final : public connection_base {
 public:
     friend Context;
-    friend packetbuf<connection>;
+    friend _detail::packetbuf<connection>;
 
     using context_type = Context;
     using traits = context_traits<context_type>;
-    using channel_state_tuple = typename traits::template channel_tuple<channel, connection>;
+    using channel_state_tuple = typename traits::template channel_tuple<_detail::channel, connection>;
 
-    connection(context_type& context, const protocol::endpoint& client_endpoint) :
-        connection_base(context, client_endpoint),
-        channels(tuple_constructor<channel_state_tuple>{}(*this)) {
+    /** Constructs a connection for a given context and remote endpoint. */
+    connection(context_type& context, const protocol::endpoint& remote_endpoint) :
+        connection_base(context, remote_endpoint),
+        channels(_detail::tuple_constructor<channel_state_tuple>{}(*this)) {
             TRELLIS_LOG_ACTION("conn", get_connection_id(), "Connection constructed.");
         }
 
     connection(const connection&) = delete;
     connection(connection&&) = delete;
+    connection& operator=(const connection&) = delete;
+    connection& operator=(connection&&) = delete;
 
+    /** Get per-channel stats. Array order corresponds to context channel order. */
     auto get_stats() const -> std::array<connection_stats, traits::channel_count> {
         return get_stats(std::make_index_sequence<traits::channel_count>{});
     }
 
+    /** Opens a packet buffer to send data. Synchronously calls func with a std::ostream representing the packet. */
     template <typename Channel, typename F>
     void send(F&& func) {
-        auto stream = opacketstream<Channel, connection>(*this);
+        auto stream = _detail::opacketstream<Channel, connection>(*this);
         std::forward<F>(func)(stream);
     }
 
@@ -64,10 +69,10 @@ private:
         constexpr auto channel_index = traits::template channel_index<Channel>;
 
         // last_payload_size is a calculated value, so double-check it here.
-        assert(last_payload_size <= config::datagram_size - headers::data_offset);
+        assert(last_payload_size <= config::datagram_size - _detail::headers::data_offset);
 
         auto& channel = std::get<channel_index>(channels);
-        auto type = headers::type::DATA;
+        auto type = _detail::headers::type::DATA;
         auto num_fragments = e - b;
         auto sid = channel.next_sequence_id();
 
@@ -79,17 +84,17 @@ private:
         for (auto iter = b; iter != e; ++iter) {
             auto& buffer = *iter;
 
-            auto header = headers::data{};
+            auto header = _detail::headers::data{};
             header.sequence_id = sid;
             header.channel_id = channel_index;
             header.fragment_count = num_fragments;
             header.fragment_id = iter - b;
 
             std::memcpy(buffer.data(), &type, sizeof(type));
-            std::memcpy(buffer.data() + sizeof(type), &header, sizeof(headers::data));
+            std::memcpy(buffer.data() + sizeof(type), &header, sizeof(_detail::headers::data));
 
             if (iter == e - 1) {
-                channel.send_packet(header, buffer, last_payload_size + headers::data_offset);
+                channel.send_packet(header, buffer, last_payload_size + _detail::headers::data_offset);
             } else {
                 channel.send_packet(header, buffer, config::datagram_size);
             }
@@ -102,13 +107,13 @@ private:
      * Neither of the callbacks are stored, feel free to capture locals by reference.
      */
     template <typename F, typename G>
-    void receive(const headers::data& header, const datagram_buffer& datagram, std::size_t count, const F& data_handler, const G& on_establish) {
+    void receive(const _detail::headers::data& header, const _detail::datagram_buffer& datagram, std::size_t count, const F& data_handler, const G& on_establish) {
         receive(header, datagram, count, data_handler, on_establish, std::make_index_sequence<std::tuple_size_v<channel_state_tuple>>{});
     }
 
     /** Do not use. Call the other overload instead. */
     template <typename F, typename G, std::size_t... Is>
-    void receive(const headers::data& header, const datagram_buffer& datagram, std::size_t count, const F& data_handler, const G& on_establish, std::index_sequence<Is...>) {
+    void receive(const _detail::headers::data& header, const _detail::datagram_buffer& datagram, std::size_t count, const F& data_handler, const G& on_establish, std::index_sequence<Is...>) {
         // should only be called from the context's receive handler, so we should be in the networking thread
         assert(get_context().is_thread_current());
 
@@ -131,13 +136,13 @@ private:
     /**
      * Receives a DATA_ACK datagram.
      */
-    void receive_ack(const headers::data_ack& header) {
+    void receive_ack(const _detail::headers::data_ack& header) {
         receive_ack(header, std::make_index_sequence<std::tuple_size_v<channel_state_tuple>>{});
     }
 
     /** Do not use. Call the other overload instead. */
     template <std::size_t... Is>
-    void receive_ack(const headers::data_ack& header, std::index_sequence<Is...>) {
+    void receive_ack(const _detail::headers::data_ack& header, std::index_sequence<Is...>) {
         // should only be called from the context's receive handler, so we should be in the networking thread
         assert(get_context().is_thread_current());
 

@@ -1,0 +1,4 @@
+PROJECT_NAME           = "Trellis"
+GENERATE_LATEX         = NO
+INPUT                  = ./include/trellis
+EXCLUDE_SYMBOLS        = trellis::_detail::*

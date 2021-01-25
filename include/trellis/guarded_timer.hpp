@@ -5,7 +5,7 @@
 #include <memory>
 #include <utility>
 
-namespace trellis {
+namespace trellis::_detail {
 
 template <typename Handler, typename GuardValue>
 auto guarded_timer_invoke(const Handler& handler, asio::error_code ec, const std::weak_ptr<GuardValue>& guard) -> decltype(handler(ec, guard)) {
@@ -22,11 +22,12 @@ class guarded_timer {
 public:
     using guard_value = GuardValue;
     using underlying_timer_type = asio::steady_timer;
+    using executor_type = underlying_timer_type::executor_type;
     using clock_type = underlying_timer_type::clock_type;
     using duration = underlying_timer_type::duration;
     using time_point = underlying_timer_type::time_point;
 
-    guarded_timer(const asio::any_io_executor& ex) : timer(ex) {}
+    explicit guarded_timer(const executor_type& executor) : timer(executor) {}
 
     auto expires_at(const time_point& expiry_time) {
         return timer.expires_at(expiry_time);
@@ -54,4 +55,4 @@ private:
     underlying_timer_type timer;
 };
 
-} // namespace trellis
+} // namespace trellis::_detail

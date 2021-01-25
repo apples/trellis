@@ -78,7 +78,7 @@ private:
         protocol::endpoint client_endpoint;
         protocol::endpoint sender_endpoint;
         protocol::socket socket;
-        datagram_storage buffer;
+        _detail::datagram_storage buffer;
     };
 
     // Client => Server
@@ -200,8 +200,8 @@ private:
     protocol::socket proxy_socket;
     protocol::endpoint remote_endpoint;
     protocol::endpoint sender_endpoint;
-    datagram_buffer proxy_buffer;
-    datagram_buffer_cache cache;
+    _detail::datagram_buffer proxy_buffer;
+    _detail::datagram_buffer_cache cache;
     std::map<protocol::endpoint, proxy_connection> connections;
     bool running;
     std::mt19937 rng;

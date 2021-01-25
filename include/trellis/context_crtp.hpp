@@ -9,6 +9,7 @@
 #include "lock_free_queue.hpp"
 #include "event.hpp"
 #include "utility.hpp"
+#include "streams_fwd.hpp"
 
 #include <asio.hpp>
 
@@ -31,6 +32,9 @@ public:
     using connection_ptr = std::shared_ptr<connection_type>;
     using receive_function = std::function<void(derived_type&, const connection_ptr&, std::istream&)>;
 
+    friend connection_type;
+
+    /** Constructs a context running on the given io_context. */
     context_crtp(asio::io_context& io) :
         context_base(io),
         sender_endpoint(),
@@ -38,6 +42,7 @@ public:
         running(false),
         events() {}
 
+    /** Closes all connections and stops the context. */
     void stop() {
         if (running) {
             running = false;
@@ -46,10 +51,26 @@ public:
         }
     }
 
+    /** Determines whether the context is currently running. */
     bool is_running() const {
         return running;
     }
 
+    /**
+     * Processes queued events and submits them to the given Handler.
+     * 
+     * Data messages are automatically routed to the overload matching the channel's tagged type.
+     * 
+     * Handler concept:
+     * ```
+     * template<typename T>
+     * concept Handler = requires(T a) {
+     *     a.on_connect(connection_ptr{});
+     *     a.on_disconnect(connection_ptr{}, asio::error_code{});
+     *     a.on_receive(Channels{}, connection_ptr{}, std::decltype<std::istream&>())...;
+     * };
+     * ```
+     */
     template <typename Handler>
     void poll_events(Handler&& handler) {
         // must be executed from user thread
@@ -58,15 +79,15 @@ public:
         while (auto e = events.pop()) {
             TRELLIS_LOG_ACTION("context_crtp", this->get_context_id(), "Dispatching event (type:", e->index(), ")");
 
-            std::visit(overload {
-                [&](const event_connect& e) {
+            std::visit(_detail::overload {
+                [&](const _detail::event_connect& e) {
                     handler.on_connect(std::static_pointer_cast<connection_type>(e.conn));
                 },
-                [&](const event_disconnect& e) {
+                [&](const _detail::event_disconnect& e) {
                     handler.on_disconnect(std::static_pointer_cast<connection_type>(e.conn), e.ec);
                 },
-                [&](const event_receive& e) {
-                    auto istream = ibytestream(e.data.data.get(), e.data.data_len);
+                [&](const _detail::event_receive& e) {
+                    auto istream = _detail::ibytestream(e.data.data.get(), e.data.data_len);
                     traits::with_channel_type(e.channel_id, [&](auto channel_type) {
                         handler.on_receive(channel_type, std::static_pointer_cast<connection_type>(e.conn), istream);
                     });
@@ -76,6 +97,8 @@ public:
     }
 
 protected:
+    using context_base::make_pending_buffer;
+
     void open(const protocol::endpoint& endpoint) {
         // must be executed from user thread
         assert(!is_thread_current());
@@ -93,7 +116,7 @@ protected:
         get_socket().close();
     }
 
-    void push_event(event&& e) {
+    void push_event(_detail::event&& e) {
         // must be executed from networking thread
         assert(is_thread_current());
 
@@ -134,9 +157,9 @@ private:
     }
 
     protocol::endpoint sender_endpoint;
-    datagram_buffer buffer;
+    _detail::datagram_buffer buffer;
     std::atomic<bool> running;
-    lock_free_queue<event> events;
+    _detail::lock_free_queue<_detail::event> events;
 };
 
 } // namespace trellis

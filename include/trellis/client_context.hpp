@@ -30,10 +30,12 @@ public:
 
     using base_type::get_context_id;
 
+    /** Constructs a context running on the given io_context. */
     client_context(asio::io_context& io) :
         base_type(io),
         conn(nullptr) {}
 
+    /** Connects the client to a server. Both the client and server need to have the same channel list. */
     void connect(const typename protocol::endpoint& client_endpoint, const typename protocol::endpoint& server_endpoint) {
         // must be executed from user thread
         assert(!this->is_thread_current());
@@ -46,19 +48,9 @@ public:
         });
     }
 
+    /** Gets the client's local endpoint. */
     auto get_endpoint() const -> typename protocol::endpoint {
         return this->get_socket().local_endpoint();
-    }
-
-    void disconnect_all() {
-        if (conn) {
-            conn->disconnect([this] {
-                assert(!conn);
-                this->close();
-            });
-        } else {
-            this->close();
-        }
     }
 
 protected:
@@ -69,7 +61,7 @@ protected:
         assert(&c == conn.get());
         TRELLIS_LOG_ACTION("client", get_context_id(), "Killing connection to ", conn->get_endpoint());
 
-        this->push_event(event_disconnect{conn, ec});
+        this->push_event(_detail::event_disconnect{conn, ec});
 
         conn = nullptr;
         this->stop();
@@ -85,7 +77,19 @@ protected:
     }
 
 private:
-    void receive(const datagram_buffer& buffer, const typename protocol::endpoint& sender_endpoint, std::size_t size) {
+    /** Disconnects the connection to the server and closes the client socket. */
+    void disconnect_all() {
+        if (conn) {
+            conn->disconnect([this] {
+                assert(!conn);
+                this->close();
+            });
+        } else {
+            this->close();
+        }
+    }
+
+    void receive(const _detail::datagram_buffer& buffer, const typename protocol::endpoint& sender_endpoint, std::size_t size) {
         TRELLIS_BEGIN_SECTION("client");
 
         // should only be called from the base receive handler, so we should be in the networking thread
@@ -101,44 +105,44 @@ private:
 
         assert(sender_endpoint == conn->get_endpoint());
 
-        auto type = headers::type{};
+        auto type = _detail::headers::type{};
 
-        std::memcpy(&type, buffer.data.data(), sizeof(headers::type));
+        std::memcpy(&type, buffer.data.data(), sizeof(_detail::headers::type));
 
         switch (type) {
-            case headers::type::CONNECT: {
+            case _detail::headers::type::CONNECT: {
                 TRELLIS_LOG_ACTION("client", get_context_id(), "Unexpected CONNECT from server ", sender_endpoint, ". Disconnecting.");
 
                 conn->disconnect();
                 break;
             }
-            case headers::type::CONNECT_OK: {
-                auto header = headers::connect_ok{};
-                std::memcpy(&header, buffer.data.data() + sizeof(type), sizeof(headers::connect_ok));
+            case _detail::headers::type::CONNECT_OK: {
+                auto header = _detail::headers::connect_ok{};
+                std::memcpy(&header, buffer.data.data() + sizeof(type), sizeof(_detail::headers::connect_ok));
 
                 TRELLIS_LOG_ACTION("client", get_context_id(), "CONNECT_OK (scid:", header.connection_id, ") from server ", sender_endpoint, ".");
 
                 conn->receive_connect_ok(header, [this] {
                     TRELLIS_LOG_ACTION("client", get_context_id(), "CONNECT_OK caused connection to become ESTABLISHED. Pushing event_connect.");
-                    this->push_event(event_connect{conn});
+                    this->push_event(_detail::event_connect{conn});
                 });
 
                 break;
             }
-            case headers::type::CONNECT_ACK: {
+            case _detail::headers::type::CONNECT_ACK: {
                 TRELLIS_LOG_ACTION("client", get_context_id(), "Unexpected CONNECT_ACK from server ", sender_endpoint, ". Disconnecting.");
 
                 conn->disconnect();
                 break;
             }
-            case headers::type::DISCONNECT: {
+            case _detail::headers::type::DISCONNECT: {
                 TRELLIS_LOG_ACTION("client", get_context_id(), "DISCONNECT from server ", sender_endpoint, ". Disconnecting without response.");
 
                 conn->disconnect_without_send({});
                 conn = nullptr;
                 break;
             }
-            case headers::type::DATA: {
+            case _detail::headers::type::DATA: {
                 if (conn->get_state() != connection_state::ESTABLISHED) {
                     TRELLIS_LOG_ACTION("client", get_context_id(), "DATA received from server ", sender_endpoint, " before being ESTABLISHED. Disconnecting.");
 
@@ -146,8 +150,8 @@ private:
                     break;
                 }
 
-                auto header = headers::data{};
-                std::memcpy(&header, buffer.data.data() + sizeof(headers::type), sizeof(headers::data));
+                auto header = _detail::headers::data{};
+                std::memcpy(&header, buffer.data.data() + sizeof(_detail::headers::type), sizeof(_detail::headers::data));
 
                 if (header.channel_id >= sizeof...(Channels)) {
                     TRELLIS_LOG_ACTION("client", get_context_id(), "DATA received with invalid channel_id. Disconnecting.");
@@ -156,8 +160,8 @@ private:
                     break;
                 }
 
-                conn->receive(header, buffer, size, [&](raw_buffer&& data) {
-                    this->push_event(event_receive{conn, header.channel_id, std::move(data)});
+                conn->receive(header, buffer, size, [&](_detail::raw_buffer&& data) {
+                    this->push_event(_detail::event_receive{conn, header.channel_id, std::move(data)});
                 }, [&] {
                     // This should be unreachable, since we check for ESTABLISHED above.
                     TRELLIS_LOG_ACTION("client", get_context_id(), "DATA caused connection to become ESTABLISHED. That's not supposed to happen. Disconnecting.");
@@ -167,7 +171,7 @@ private:
 
                 break;
             }
-            case headers::type::DATA_ACK: {
+            case _detail::headers::type::DATA_ACK: {
                 if (conn->get_state() != connection_state::ESTABLISHED) {
                     TRELLIS_LOG_ACTION("client", get_context_id(), "DATA_ACK received from server ", sender_endpoint, " before being ESTABLISHED. Disconnecting.");
 
@@ -175,8 +179,8 @@ private:
                     break;
                 }
 
-                auto header = headers::data_ack{};
-                std::memcpy(&header, buffer.data.data() + sizeof(headers::type), sizeof(headers::data_ack));
+                auto header = _detail::headers::data_ack{};
+                std::memcpy(&header, buffer.data.data() + sizeof(_detail::headers::type), sizeof(_detail::headers::data_ack));
 
                 if (header.channel_id >= sizeof...(Channels)) {
                     TRELLIS_LOG_ACTION("client", get_context_id(), "DATA_ACK received with invalid channel_id. Disconnecting.");

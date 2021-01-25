@@ -10,7 +10,7 @@
 #include <memory>
 #include <optional>
 
-namespace trellis {
+namespace trellis::_detail {
 
 class fragment_assembler {
 public:
@@ -116,4 +116,4 @@ private:
     std::bitset<config::max_fragments> complete;
 };
 
-} // namespace trellis
+} // namespace trellis::_detail

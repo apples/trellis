@@ -2,7 +2,7 @@
 
 #include "channel_unreliable.hpp"
 
-namespace trellis {
+namespace trellis::_detail {
 
 /** Channel implementing an unreliable sequenced protocol. */
 class channel_unreliable_sequenced : public channel_unreliable {
@@ -31,4 +31,4 @@ private:
     config::sequence_id_t incoming_sequence_id;
 };
 
-} // namespace trellis
+} // namespace trellis::_detail

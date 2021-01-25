@@ -11,7 +11,7 @@
 
 #include <unordered_map>
 
-namespace trellis {
+namespace trellis::_detail {
 
 /**
  * Channel implementing a reliable ordered protocol.
@@ -166,4 +166,4 @@ protected:
     retry_queue<outgoing_entry, connection_base, context_base::executor_type> outgoing_queue;
 };
 
-} // namespace trellis
+} // namespace trellis::_detail

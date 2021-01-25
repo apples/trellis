@@ -10,7 +10,7 @@
 #include <list>
 #include <utility>
 
-namespace trellis {
+namespace trellis::_detail {
 
 using datagram_storage = std::array<char, config::datagram_size>;
 
@@ -233,4 +233,4 @@ inline shared_datagram_buffer::shared_datagram_buffer(datagram_buffer* iter) :
         ++iter->refcount;
     }
 
-} // namespace trellis
+} // namespace trellis::_detail

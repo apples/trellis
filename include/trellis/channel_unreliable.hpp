@@ -11,7 +11,7 @@
 
 #include <string_view>
 
-namespace trellis {
+namespace trellis::_detail {
 
 /** Channel implementing an unreliable protocol. */
 class channel_unreliable {
@@ -116,4 +116,4 @@ protected:
     std::array<fragment_assembler, config::assembler_slots> assemblers;
 };
 
-} // namespace trellis
+} // namespace trellis::_detail

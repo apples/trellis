@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <variant>
 
-namespace trellis::headers {
+namespace trellis::_detail::headers {
 
 enum type : std::uint8_t {
     CONNECT,
@@ -46,4 +46,4 @@ struct data_ack {
 
 constexpr std::size_t data_offset = sizeof(type) + sizeof(data);
 
-} // namespace trellis::headers
+} // namespace trellis::_detail::headers

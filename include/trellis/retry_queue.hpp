@@ -8,7 +8,7 @@
 #include <memory>
 #include <vector>
 
-namespace trellis {
+namespace trellis::_detail {
 
 /** Implements a time-delayed priority queue. */
 template <typename Value, typename Guard, typename Executor, typename Timer = guarded_timer<Guard>, typename Handler = std::function<void(const Value&)>>
@@ -235,4 +235,4 @@ private:
     callback_type callback;
 };
 
-} // namespace trellis
+} // namespace trellis::_detail

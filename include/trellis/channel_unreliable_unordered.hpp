@@ -2,7 +2,7 @@
 
 #include "channel_unreliable.hpp"
 
-namespace trellis {
+namespace trellis::_detail {
 
 /** Channel implementing an unreliable unordered protocol. */
 class channel_unreliable_unordered : public channel_unreliable {
@@ -20,4 +20,4 @@ public:
     }
 };
 
-} // namespace trellis
+} // namespace trellis::_detail

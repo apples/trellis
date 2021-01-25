@@ -5,7 +5,7 @@
 #include <optional>
 #include <type_traits>
 
-namespace trellis {
+namespace trellis::_detail {
 
 template <typename T>
 class lock_free_queue {
@@ -132,4 +132,4 @@ private:
     std::atomic<list_node*> _last;
 };
 
-} // namespace trellis
+} // namespace trellis::_detail

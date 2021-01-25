@@ -14,7 +14,7 @@ using fragment_id_t = std::uint8_t;
 
 } // namespace trellis::config
 
-namespace trellis {
+namespace trellis::_detail {
 
 inline constexpr auto sequence_id_less(config::sequence_id_t a, config::sequence_id_t b) -> bool {
     using limits = std::numeric_limits<config::sequence_id_t>;
@@ -24,4 +24,4 @@ inline constexpr auto sequence_id_less(config::sequence_id_t a, config::sequence
     return (a != b) && (b - a <= max_gap);
 }
 
-} // namespace trellis
+} // namespace trellis::_detail

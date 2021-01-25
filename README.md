@@ -4,6 +4,10 @@ Trellis is a connection-oriented UDP networking framework designed primarily for
 
 It is currently experimental, incomplete, and unstable.
 
+## Documentation
+
+The public API is documented with Doxygen comments, which can be converted to HTML using the included `Doxyfile`.
+
 ## Features
 
 ### Connections
@@ -26,31 +30,27 @@ Large messages are automatically fragmented and reassembled according to the MTU
 
 Reliable channels, in the event of packet loss, only resend the fragments that were lost.
 
-## TODO
+### Header Only
 
-- [x] Unreliable, unordered channels
-- [x] Unreliable, sequenced channels
-- [x] Reliable, unordered channels
-- [x] Reliable, ordered channels
-- [x] Reliable, sequenced channels
-- [x] Network condition simulation proxy
-- [x] Unit tests
+Being header-only allows Trellis to be included in your project in a familiar and easy way.
+
+No special compile flags or third-party binaries are needed.
 
 ## Dependencies
 
-- [Asio](https://think-async.com/Asio/) - Required for core behavior.
-- [Cereal](https://uscilab.github.io/cereal/) - Used for examples.
-- [SDL2](https://www.libsdl.org/) - Used for examples.
-
-## Examples Assets Acknowledgements
-
-- [Fonts](https://nimblebeastscollective.itch.io/magosfonts)
+- [Asio](https://think-async.com/Asio/) (submodule) - Required for core behavior.
+- [Cereal](https://uscilab.github.io/cereal/) (submodule) - Used for examples.
+- [SDL2](https://www.libsdl.org/) - Used for Asteroids example.
 
 ## Usage
 
 Trellis is a header-only library.
 
+The `CMakeLists.txt` is responsible for building everything.
+
 See the `examples/pingpong/` directory for a simple example.
+
+See the `examples/asteroids/` directory for a more realistic example.
 
 ## License
 

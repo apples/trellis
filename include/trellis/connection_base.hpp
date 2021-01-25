@@ -4,6 +4,8 @@
 #include "guarded_timer.hpp"
 #include "logging.hpp"
 #include "message_header.hpp"
+#include "channel_unreliable_fwd.hpp"
+#include "channel_reliable_fwd.hpp"
 
 #include <asio.hpp>
 
@@ -15,6 +17,7 @@
 
 namespace trellis {
 
+/** Connection lifecycle state. */
 enum class connection_state {
     /** Default state, connection is unavailable. */
     INACTIVE,
@@ -28,20 +31,22 @@ enum class connection_state {
     DISCONNECTED,
 };
 
+/** Base connection. Provides basic observers and allows disconnect. */
 class connection_base : public std::enable_shared_from_this<connection_base> {
 public:
-    friend class channel_unreliable;
-    friend class channel_reliable;
+    friend _detail::channel_unreliable;
+    friend _detail::channel_reliable;
 
     using protocol = context_base::protocol;
-    using timer_type = guarded_timer<connection_base>;
+    using timer_type = _detail::guarded_timer<connection_base>;
 
     using std::enable_shared_from_this<connection_base>::shared_from_this;
     using std::enable_shared_from_this<connection_base>::weak_from_this;
 
-    connection_base(context_base& context, const protocol::endpoint& client_endpoint) :
+    /** Constructs a connection for the given context and remote endpoint. */
+    connection_base(context_base& context, const protocol::endpoint& remote_endpoint) :
         context(&context),
-        client_endpoint(client_endpoint),
+        remote_endpoint(remote_endpoint),
         state(connection_state::INACTIVE),
         connection_id(std::uniform_int_distribution<std::uint16_t>{}(context.get_rng())),
         handshake(std::nullopt) {
@@ -50,27 +55,35 @@ public:
 
     connection_base(const connection_base&) = delete;
     connection_base(connection_base&&) = delete;
+    connection_base& operator=(const connection_base&) = delete;
+    connection_base& operator=(connection_base&&) = delete;
 
+    /** Gets the parent context. */
     auto get_context() -> context_base& {
         return *context;
     }
 
+    /** Gets the remote endpoint. */
     auto get_endpoint() const -> const asio::ip::udp::endpoint& {
-        return client_endpoint;
+        return remote_endpoint;
     }
 
+    /** Gets the current connection state. */
     auto get_state() const -> connection_state {
         return state;
     }
 
+    /** Gets the connection ID. May recycle IDs from closed connections. */
     auto get_connection_id() -> std::uint16_t {
         return connection_id;
     }
 
+    /** Close the connection and send a disconnect message. */
     void disconnect() {
         disconnect([]{});
     }
 
+    /** Close the connection and send a disconnect message. Asynchronously calls func when done. */
     template <typename F>
     void disconnect(const F& func) {
         context->dispatch([this, func]() {
@@ -84,14 +97,14 @@ public:
             state = connection_state::DISCONNECTED;
 
             auto buffer = context->make_pending_buffer();
-            auto type = headers::type::DISCONNECT;
+            auto type = _detail::headers::type::DISCONNECT;
             std::memcpy(buffer.data(), &type, sizeof(type));
 
             TRELLIS_LOG_DATAGRAM("d/cn", buffer, sizeof(type));
 
             context->get_socket().async_send_to(
                 buffer.buffer(sizeof(type)),
-                client_endpoint,
+                remote_endpoint,
                 context->bind_executor([buffer, func, self = this->shared_from_this()]([[maybe_unused]] asio::error_code ec, [[maybe_unused]] std::size_t size) {
                     if (!ec) {
                         TRELLIS_LOG_ACTION("conn", self->connection_id, "Sent DISCONNECT successfully, killing connection.");
@@ -113,7 +126,7 @@ protected:
     }
 
     /** Sends a datagram. */
-    void send_raw(const shared_datagram_buffer& data, std::size_t count) {
+    void send_raw(const _detail::shared_datagram_buffer& data, std::size_t count) {
         get_context().dispatch([wptr = weak_from_this(), data, count]{
             auto ptr = wptr.lock();
 
@@ -125,7 +138,7 @@ protected:
 
             ptr->context->get_socket().async_send_to(
                 data.buffer(count),
-                ptr->client_endpoint,
+                ptr->remote_endpoint,
                 ptr->context->bind_executor([data, ptr](asio::error_code ec, [[maybe_unused]] std::size_t size) {
                     if (ec) {
                         TRELLIS_LOG_ACTION("conn", ptr->connection_id, "ERROR send_raw: ", ec.category().name(), ": ", ec.message());
@@ -151,7 +164,7 @@ protected:
             state = connection_state::CONNECTING;
 
             auto buffer = context->make_pending_buffer();
-            auto type = headers::type::CONNECT;
+            auto type = _detail::headers::type::CONNECT;
 
             std::memcpy(buffer.data(), &type, sizeof(type));
 
@@ -182,7 +195,7 @@ protected:
             if (state != connection_state::CONNECTING) return;
 
             TRELLIS_LOG_ACTION("conn", connection_id, "Resending CONNECT due to timeout.");
-            send_raw(handshake->buffer, sizeof(headers::type));
+            send_raw(handshake->buffer, sizeof(_detail::headers::type));
 
             send_connect();
         });
@@ -197,7 +210,7 @@ protected:
      * The server will also stop sending CONNECT_OKs when we send our first DATA message.
      */
     template <typename F>
-    void receive_connect_ok(const headers::connect_ok& connect_ok, const F& on_establish) {
+    void receive_connect_ok(const _detail::headers::connect_ok& connect_ok, const F& on_establish) {
         // should only be called from parent context, so we should be in the networking thread
         assert(get_context().is_thread_current());
 
@@ -217,10 +230,10 @@ protected:
         assert(!handshake);
 
         auto buffer = context->make_pending_buffer();
-        auto type = headers::type::CONNECT_ACK;
+        auto type = _detail::headers::type::CONNECT_ACK;
 
         // The connection_id needs to match the one in the CONNECT_OK message.
-        auto header = headers::connect_ack{connect_ok.connection_id};
+        auto header = _detail::headers::connect_ack{connect_ok.connection_id};
 
         constexpr auto size = sizeof(type) + sizeof(header);
 
@@ -247,8 +260,8 @@ protected:
             state = connection_state::PENDING;
 
             auto buffer = context->make_pending_buffer();
-            auto type = headers::type::CONNECT_OK;
-            auto header = headers::connect_ok{connection_id};
+            auto type = _detail::headers::type::CONNECT_OK;
+            auto header = _detail::headers::connect_ok{connection_id};
             constexpr auto size = sizeof(type) + sizeof(header);
 
             std::memcpy(buffer.data(), &type, sizeof(type));
@@ -285,7 +298,7 @@ protected:
             // If state is not PENDING, this was a spurious wakeup.
             if (state != connection_state::PENDING) return;
 
-            constexpr auto size = sizeof(headers::type) + sizeof(headers::connect_ok);
+            constexpr auto size = sizeof(_detail::headers::type) + sizeof(_detail::headers::connect_ok);
 
             TRELLIS_LOG_ACTION("conn", connection_id, "Resending CONNECT_OK due to timeout.");
 
@@ -360,8 +373,8 @@ protected:
         TRELLIS_LOG_ACTION("conn", connection_id, "Sending DATA_ACK (cid:", cid, ",sid:", sid, ",fid:", fid, ").");
 
         auto buffer = context->make_pending_buffer();
-        auto type = headers::type::DATA_ACK;
-        auto header = headers::data_ack{sid, eid, cid, fid};
+        auto type = _detail::headers::type::DATA_ACK;
+        auto header = _detail::headers::data_ack{sid, eid, cid, fid};
         constexpr auto size = sizeof(type) + sizeof(header);
 
         std::memcpy(buffer.data(), &type, sizeof(type));
@@ -374,11 +387,11 @@ protected:
 private:
     struct handshake_state {
         timer_type timer;
-        shared_datagram_buffer buffer;
+        _detail::shared_datagram_buffer buffer;
     };
 
     context_base* context;
-    protocol::endpoint client_endpoint;
+    protocol::endpoint remote_endpoint;
     std::atomic<connection_state> state;
     std::uint16_t connection_id;
     std::optional<handshake_state> handshake;

@@ -5,7 +5,7 @@
 #include <iostream>
 #include <streambuf>
 
-namespace trellis {
+namespace trellis::_detail {
 
 class bytebuf final : public std::streambuf {
 public:
@@ -32,11 +32,8 @@ private:
     bytebuf buf;
 };
 
-template <typename C>
-class packetbuf : public std::streambuf {
+class packetbuf_base : public std::streambuf {
 public:
-    using connection_type = C;
-
     using std::streambuf::traits_type;
     using std::streambuf::int_type;
     using std::streambuf::pos_type;
@@ -47,17 +44,17 @@ public:
 
     static constexpr std::size_t payload_size = config::datagram_size - headers::data_offset;
 
-    packetbuf(connection_type& conn) :
+    packetbuf_base(connection_base& conn) :
         conn(&conn),
         fragments(),
         fragments_back(fragments.begin()),
         current_fragment(fragments.begin()),
         max_pos(0) {}
 
-    packetbuf(const packetbuf&) = delete;
-    packetbuf(packetbuf&&) = delete;
-    packetbuf& operator=(const packetbuf&) = delete;
-    packetbuf& operator=(packetbuf&&) = delete;
+    packetbuf_base(const packetbuf_base&) = delete;
+    packetbuf_base(packetbuf_base&&) = delete;
+    packetbuf_base& operator=(const packetbuf_base&) = delete;
+    packetbuf_base& operator=(packetbuf_base&&) = delete;
 
     virtual int_type overflow(int_type ch) {
         if (!traits_type::eq_int_type(ch, traits_type::eof())) {
@@ -161,6 +158,26 @@ public:
         return new_pos;
     }
 
+protected:
+    connection_base* conn;
+    fragment_array fragments;
+    fragment_iterator fragments_back;
+    fragment_iterator current_fragment;
+    pos_type max_pos;
+};
+
+template <typename C>
+class packetbuf final : public packetbuf_base {
+public:
+    using connection_type = C;
+
+    packetbuf(connection_type& conn) : packetbuf_base(conn) {}
+
+    packetbuf(const packetbuf&) = delete;
+    packetbuf(packetbuf&&) = delete;
+    packetbuf& operator=(const packetbuf&) = delete;
+    packetbuf& operator=(packetbuf&&) = delete;
+
     template <typename Channel>
     void send() {
         auto total_size = std::max(off_type(max_pos), off_type(seekoff(0, std::ios_base::cur, std::ios_base::out)));
@@ -169,19 +186,12 @@ public:
         auto last_payload_size = total_size % payload_size;
         assert(last_payload_size <= payload_size);
 
-        conn->template send_data<Channel>(fragments.begin(), fragments_back, last_payload_size);
+        static_cast<connection_type*>(conn)->template send_data<Channel>(fragments.begin(), fragments_back, last_payload_size);
     }
-
-private:
-    connection_type* conn;
-    fragment_array fragments;
-    fragment_iterator fragments_back;
-    fragment_iterator current_fragment;
-    pos_type max_pos;
 };
 
 template <typename Channel, typename C>
-class opacketstream : public std::ostream {
+class opacketstream final : public std::ostream {
 public:
     using channel_type = Channel;
     using connection_type = C;
@@ -197,4 +207,4 @@ private:
     buf_type buf;
 };
 
-} // namespace trellis
+} // namespace trellis::_detail

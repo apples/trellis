@@ -4,7 +4,7 @@
 #include <tuple>
 #include <type_traits>
 
-namespace trellis {
+namespace trellis::_detail {
 
 // index_of
 
@@ -66,4 +66,4 @@ struct overload : Ts... {
 template <typename... Ts>
 overload(Ts...) -> overload<Ts...>;
 
-} // namespace trellis
+} // namespace trellis::_detail

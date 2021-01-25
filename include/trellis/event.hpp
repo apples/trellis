@@ -5,18 +5,16 @@
 #include <memory>
 #include <variant>
 
-namespace trellis {
+namespace trellis::_detail {
 
 struct event_connect {
-    using connection_type = void;
-    using connection_ptr = std::shared_ptr<connection_type>;
+    using connection_ptr = std::shared_ptr<void>;
 
     connection_ptr conn;
 };
 
 struct event_disconnect {
-    using connection_type = void;
-    using connection_ptr = std::shared_ptr<connection_type>;
+    using connection_ptr = std::shared_ptr<void>;
 
     connection_ptr conn;
     asio::error_code ec;
@@ -24,8 +22,7 @@ struct event_disconnect {
 
 class event_receive {
 public:
-    using connection_type = void;
-    using connection_ptr = std::shared_ptr<connection_type>;
+    using connection_ptr = std::shared_ptr<void>;
 
     connection_ptr conn;
     std::uint8_t channel_id;
@@ -34,4 +31,4 @@ public:
 
 using event = std::variant<event_connect, event_disconnect, event_receive>;
 
-} // namespace trellis
+} // namespace trellis::_detail

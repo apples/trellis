@@ -2,7 +2,7 @@
 
 #include "channel_reliable.hpp"
 
-namespace trellis {
+namespace trellis::_detail {
 
 /**
  * Channel implementing a reliable sequenced protocol.
@@ -52,4 +52,4 @@ public:
     }
 };
 
-} // namespace trellis
+} // namespace trellis::_detail

@@ -7,7 +7,7 @@
 #include "channel_reliable_unordered.hpp"
 #include "channel_reliable_sequenced.hpp"
 
-namespace trellis {
+namespace trellis::_detail {
 
 /** Connection-specific channel type. */
 template <typename Connection, typename ChannelDef>
@@ -43,4 +43,4 @@ public:
     using channel_reliable_sequenced::channel_reliable_sequenced;
 };
 
-} // namespace trellis
+} // namespace trellis::_detail
