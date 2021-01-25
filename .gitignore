@@ -1,3 +1,7 @@
-.vscode/
-build/
-html/
+/.vscode
+/build
+/html
+
+/docs/_build
+/docs/_static
+/docs/_templates
